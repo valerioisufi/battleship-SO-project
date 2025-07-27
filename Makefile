@@ -2,8 +2,8 @@ CC = gcc
 CFLAGS = -Wall -Wextra -g
 SRC_DIR = src
 
-CLIENT_SRC = $(SRC_DIR)/client.c $(SRC_DIR)/cmdLineParser.c
-SERVER_SRC = $(SRC_DIR)/server.c $(SRC_DIR)/cmdLineParser.c
+CLIENT_SRC = $(SRC_DIR)/client.c $(SRC_DIR)/utils/cmdLineParser.c
+SERVER_SRC = $(SRC_DIR)/server.c $(SRC_DIR)/utils/cmdLineParser.c
 
 all: client server
 

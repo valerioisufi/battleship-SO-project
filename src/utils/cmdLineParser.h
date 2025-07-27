@@ -14,3 +14,5 @@ void parseCmdLine(int argc, char *argv[], ArgvParam *argvParams);
 void printUsage(char *fileName, ArgvParam *argvParams);
 
 ArgvParam *setArgvParams(char *paramsName);
+
+char *getArgvParamValue(char *paramName, ArgvParam *argvParams);

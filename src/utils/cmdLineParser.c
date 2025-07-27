@@ -111,3 +111,21 @@ ArgvParam *setArgvParams(char *paramsName){
     free(paramsCopy);
     return head;
 }
+
+/**
+ * @param paramName Nome del parametro.
+ * @param argvParams Lista concatenata di ArgvParam.
+ * @return Valore del parametro se questo è stato impostato (char *); NULL altrimenti.
+ */
+char *getArgvParamValue(char *paramName, ArgvParam *argvParams){
+    ArgvParam *curr = argvParams;
+    while(curr->next != NULL){
+        curr = curr->next;
+        if(!strcmp(curr->paramName, paramName)){
+            if(curr->isSet){
+                return curr->paramValue;
+            } else break;
+        }
+    }
+    return NULL;
+}
