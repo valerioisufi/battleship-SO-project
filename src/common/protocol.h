@@ -40,7 +40,7 @@ typedef struct _PayloadNode {
 
 
 Msg *recvMsg(int socket_fd);
-void sendMsg(int socket_fd, Msg *msg);
+int sendMsg(int socket_fd, Msg *msg);
 
 Msg *createMsg(uint16_t header_type, uint32_t payload_size, char *payload);
 void freeMsg(Msg *msg);
@@ -48,6 +48,6 @@ void freeMsg(Msg *msg);
 PayloadNode *parsePayload(char *buffer);
 char *serializePayload(PayloadNode *head);
 
-void updatePayload(PayloadNode *head, char *key, char *value);
+PayloadNode *updatePayload(PayloadNode *head, char *key, char *value);
 char *getPayloadValue(PayloadNode *head, char *key);
 void freePayloadNodes(PayloadNode *head);

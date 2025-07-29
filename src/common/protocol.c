@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
+
 #include <sys/socket.h>
 #include "common/protocol.h"
 
@@ -22,7 +23,6 @@ void markClientAsDisconnected(){}
  * @return 0 se tutti i byte sono stati inviati correttamente, -1 in caso di errore o disconnessione.
  */
 int sendByteStream(int socket_fd, char *buffer, size_t num_bytes){
-
     size_t bytes_sent = 0;
     int result;
 
@@ -37,7 +37,6 @@ int sendByteStream(int socket_fd, char *buffer, size_t num_bytes){
         bytes_sent += result;
     }
     return 0;
-
 }
 
 /**
@@ -49,7 +48,6 @@ int sendByteStream(int socket_fd, char *buffer, size_t num_bytes){
  * @return 0 se tutti i byte sono stati ricevuti correttamente, -1 in caso di errore o disconnessione.
  */
 int recvByteStream(int socket_fd, char *buffer, size_t num_bytes){
-
     size_t bytes_received = 0;
     int result;
 
@@ -76,7 +74,7 @@ int recvByteStream(int socket_fd, char *buffer, size_t num_bytes){
 Msg *recvMsg(int socket_fd){
     char header_buffer[HEADER_SIZE];
     if(recvByteStream(socket_fd, header_buffer, HEADER_SIZE) == -1){
-        // TODO mark client as disconnected
+        return NULL;
     }
 
     Header header;
@@ -86,7 +84,8 @@ Msg *recvMsg(int socket_fd){
     char *payload_buffer = (char *)malloc(payload_size);
     if(payload_buffer == NULL) exit(EXIT_FAILURE);
     if(recvByteStream(socket_fd, payload_buffer, payload_size) == -1){
-        // TODO mark client as disconnected
+        free(payload_buffer);
+        return NULL;
     }
 
     // a questo punto dispongo del messaggio completo
@@ -104,21 +103,21 @@ Msg *recvMsg(int socket_fd){
  * 
  * @param sock_fd File descriptor della socket su cui inviare.
  * @param msg Puntatore alla struttura Msg contenente header e payload da inviare.
- * 
+ * @return 0 se il messaggio è stato inviato correttamente, -1 in caso di errore o disconnessione.
+ *
  * La funzione invia prima l'header e poi il payload, assicurandosi che tutti i byte vengano trasmessi.
- * In caso di errore nella trasmissione, il programma viene terminato con exit.
  */
-void sendMsg(int socket_fd, Msg *msg){
+int sendMsg(int socket_fd, Msg *msg){
     char *header_buffer = (char *)&msg->header;
 
     if(sendByteStream(socket_fd, header_buffer, HEADER_SIZE) == -1){
-        // TODO mark client as disconnected
+        return -1;
     }
 
     if(sendByteStream(socket_fd, msg->payload, msg->header.payloadSize) == -1){
-        // TODO mark client as disconnected
+        return -1;
     }
-
+    return 0;
 }
 
 
@@ -295,11 +294,21 @@ char *serializePayload(PayloadNode *head){
 /**
  * Aggiorna il valore associato a una chiave nella lista di PayloadNode.
  * Se la chiave non esiste, aggiunge un nuovo nodo in fondo alla lista.
+ * Se il nodo esiste, libera il vecchio valore e lo sostituisce con il nuovo.
+ * Se la lista è vuota, crea un nodo head.
  * @param head Puntatore al nodo sentinella della lista di PayloadNode.
  * @param key Chiave da aggiornare o inserire.
  * @param value Nuovo valore da associare alla chiave.
+ * @return Puntatore alla testa della lista aggiornata.
  */
-void updatePayload(PayloadNode *head, char *key, char *value){
+PayloadNode *updatePayload(PayloadNode *head, char *key, char *value){
+    if(key == NULL || value == NULL) {
+        fprintf(stderr, "updatePayload: key or value is NULL\n");
+        exit(EXIT_FAILURE);
+    }
+    if(head == NULL) {
+        head = (PayloadNode *)calloc(1, sizeof(PayloadNode));
+    }
     PayloadNode *curr = head;
     while(curr->next){
         curr = curr->next;
@@ -307,7 +316,7 @@ void updatePayload(PayloadNode *head, char *key, char *value){
         if(strcmp(curr->key, key) == 0){
             free(curr->value); // libera il vecchio valore
             curr->value = strdup(value); // assegna il nuovo valore
-            return;
+            return head;
         }
     }
 
@@ -320,6 +329,7 @@ void updatePayload(PayloadNode *head, char *key, char *value){
     new->next = NULL;
 
     curr->next = new; // aggiungo il nuovo nodo alla fine della lista
+    return head;
 }
 
 /**
