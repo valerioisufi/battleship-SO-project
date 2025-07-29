@@ -5,14 +5,9 @@
 #include <errno.h>
 
 #include <sys/socket.h>
+#include <sys/epoll.h>
 #include "common/protocol.h"
 
-
-/**
- * Segnala che un client si è disconnesso.
- * (Funzione placeholder, da implementare secondo la logica dell'applicazione.)
- */
-void markClientAsDisconnected(){}
 
 /**
  * Invia un flusso di byte su una socket, assicurandosi che tutti i byte richiesti vengano trasmessi.
@@ -81,12 +76,13 @@ Msg *recvMsg(int socket_fd){
     memcpy(&header, header_buffer, HEADER_SIZE);
     uint32_t payload_size = header.payloadSize;
 
-    char *payload_buffer = (char *)malloc(payload_size);
+    char *payload_buffer = (char *)malloc(payload_size + 1);
     if(payload_buffer == NULL) exit(EXIT_FAILURE);
     if(recvByteStream(socket_fd, payload_buffer, payload_size) == -1){
         free(payload_buffer);
         return NULL;
     }
+    payload_buffer[payload_size] = '\0'; // Assicura che il payload sia una stringa C valida
 
     // a questo punto dispongo del messaggio completo
     Msg *msg = (Msg *)malloc(sizeof(Msg));
@@ -366,4 +362,53 @@ void freePayloadNodes(PayloadNode *head){
         free(curr);
         curr = next;
     }
+}
+
+
+
+/**
+ * Invia un messaggio a un client in modo sicuro, gestendo errori e cleanup automatico.
+ * Se l'invio fallisce,  libera le risorse.
+ * @param client_fd File descriptor della socket del client.
+ * @param msg_type Tipo del messaggio da inviare.
+ * @param payload Lista di PayloadNode da serializzare e inviare come payload.
+ * @return 0 se l'invio è andato a buon fine, -1 in caso di errore (con cleanup già effettuato).
+ */
+int safeSendMsg(int client_fd, uint16_t msg_type, PayloadNode *payload){
+    char *serialized = serializePayload(payload);
+    Msg *msg = createMsg(msg_type, strlen(serialized) + 1, serialized);
+    if (sendMsg(client_fd, msg) == -1) {
+        fprintf(stderr, "Errore durante l'invio al client %d\n", client_fd);
+        freeMsg(msg);
+        free(serialized);
+        freePayloadNodes(payload);
+        return -1;
+    }
+
+    freeMsg(msg);
+    free(serialized);
+    freePayloadNodes(payload);
+    return 0;
+}
+
+
+/**
+ * Riceve un messaggio da un client in modo sicuro, gestendo errori e cleanup automatico.
+ * In caso di errore o disconnessione, libera le risorse.
+ * @param client_fd File descriptor della socket del client.
+ * @param msg_type_out Puntatore dove verrà scritto il tipo del messaggio ricevuto.
+ * @param payload_out Puntatore dove verrà scritto il payload deserializzato (lista di PayloadNode).
+ * @return 0 se la ricezione è andata a buon fine, -1 in caso di errore (con cleanup già effettuato).
+ */
+int safeRecvMsg(int client_fd, uint16_t *msg_type_out, PayloadNode **payload_out) {
+    Msg *received_msg = recvMsg(client_fd);
+    if (received_msg == NULL) {
+        fprintf(stderr, "Errore durante la ricezione del messaggio dal client %d\nChiudo la connessione con il client...\n", client_fd);
+        return -1;
+    }
+
+    *msg_type_out = received_msg->header.msgType;
+    *payload_out = parsePayload(received_msg->payload);
+    freeMsg(received_msg);
+    return 0;
 }

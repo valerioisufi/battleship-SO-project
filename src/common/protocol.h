@@ -51,3 +51,6 @@ char *serializePayload(PayloadNode *head);
 PayloadNode *updatePayload(PayloadNode *head, char *key, char *value);
 char *getPayloadValue(PayloadNode *head, char *key);
 void freePayloadNodes(PayloadNode *head);
+
+int safeSendMsg(int client_fd, uint16_t msg_type, PayloadNode *payload);
+int safeRecvMsg(int client_fd, uint16_t *msg_type_out, PayloadNode **payload_out);
