@@ -25,7 +25,7 @@ void parseCmdLine(int argc, char *argv[], ArgvParam *argvParams){
             while(curr->next != NULL){
                 curr = curr->next;
                 if(!strcmp(argv[i]+1, curr->paramName)){
-                    if(!curr->isSet){
+                    if(curr->isSet){
                         printf("Al parametro -%s è già stato assegnato un valore\n", curr->paramName);
                         printUsage(argv[0], argvParams);
                         exit(0);
@@ -128,4 +128,19 @@ char *getArgvParamValue(char *paramName, ArgvParam *argvParams){
         }
     }
     return NULL;
+}
+
+/**
+ * Libera la memoria allocata per la lista di ArgvParam.
+ * @param head Puntatore alla testa della lista di ArgvParam.
+ */
+void freeArgvParams(ArgvParam *head){
+    ArgvParam *curr = head;
+    while(curr){
+        ArgvParam *next = curr->next;
+        free(curr->paramName);
+        free(curr->paramValue);
+        free(curr);
+        curr = next;
+    }
 }
