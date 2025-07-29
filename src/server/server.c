@@ -106,6 +106,18 @@ int main(int argc, char *argv[]){
 
 }
 
+
+/**
+ * Rimuove un client dal set epoll e chiude la relativa socket.
+ * Utile per gestire la disconnessione e il cleanup di risorse associate a un client.
+ * @param epoll_fd File descriptor dell'epoll.
+ * @param client_fd File descriptor della socket del client da chiudere.
+ */
+void cleanupClient(int epoll_fd, int client_fd) {
+    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
+    close(client_fd);
+}
+
 #define MAX_EVENTS 128
 void *lobby_thread_main(void *arg) {
     int lobby_pipe_fd = *(int *)arg;
@@ -136,55 +148,50 @@ void *lobby_thread_main(void *arg) {
             }else{
                 int client_s = events[n].data.fd;
 
-                Msg *received_msg = recvMsg(client_s); // Gestisce il messaggio ricevuto dal client
-                if (received_msg == NULL) {
-                    fprintf(stderr, "Errore durante la ricezione del messaggio dal client %d\nChiudo la connessione con il client...\n", client_s);
-                    epoll_ctl(lobby_epoll_fd, EPOLL_CTL_DEL, client_s, NULL);
-                    close(client_s);
+                uint16_t msg_type;
+                PayloadNode *payload = NULL;
+                if(safeRecvMsg(client_s, &msg_type, &payload) < 0){
+                    fprintf(stderr, "Errore durante la ricezione del messaggio di benvenuto dal server\n");
+                    cleanupClient(lobby_epoll_fd, client_s);
                     continue; // Continua ad accettare altri messaggi
                 }
-                PayloadNode *payload = parsePayload(received_msg->payload);
 
-                switch(received_msg->header.msgType){
+                switch(msg_type){
                     case MSG_LOGIN:
                         // Gestione del login
-                        if (payload) {
-                            char *username = getPayloadValue(payload, "username");
-                            if (username) {
-                                printf("Utente %s si è connesso.\n", username);
-                                Msg *welcome_msg = createMsg(MSG_WELCOME, 0, "");
-                                if(sendMsg(client_s, welcome_msg) == -1) {
-                                    fprintf(stderr, "Errore durante l'invio del messaggio di benvenuto a %s.\n", username);
-                                    freeMsg(welcome_msg);
-                                    free(username);
-                                    epoll_ctl(lobby_epoll_fd, EPOLL_CTL_DEL, client_s, NULL);
-                                    close(client_s);
-                                    freePayloadNodes(payload);
-                                    continue; // Continua ad accettare altri messaggi
-                                }
+                        char *username = getPayloadValue(payload, "username");
+                        freePayloadNodes(payload);
 
-                                printf("Messaggio di benvenuto inviato a %s.\n", username);
-                                
+                        if (username) {
+                            printf("Utente %s si è connesso.\n", username);
+                            if(safeSendMsg(client_s, MSG_WELCOME, NULL) < 0){
+                                fprintf(stderr, "Errore durante l'invio del messaggio di benvenuto a %s.\n", username);
+                                cleanupClient(lobby_epoll_fd, client_s);
                                 free(username);
-                                freeMsg(welcome_msg);
-                            } else {
-                                fprintf(stderr, "Messaggio di login non valido.\n");
+                                continue; // Continua ad accettare altri messaggi
                             }
+
+                            printf("Messaggio di benvenuto inviato a %s.\n", username);
+                            free(username);
                         } else {
-                            fprintf(stderr, "Payload non valido per il messaggio di login.\n");
+                            fprintf(stderr, "Messaggio di login non valido.\n");
                         }
                         break;
 
                     default:
-                        fprintf(stderr, "Messaggio non riconosciuto: %d\n", received_msg->header.msgType);
+                        freePayloadNodes(payload);
+
+                        fprintf(stderr, "Messaggio non riconosciuto: %d\n", msg_type);
+                        if(safeSendMsg(client_s, MSG_ERROR_UNEXPECTED_MESSAGE, NULL) < 0){
+                            fprintf(stderr, "Errore durante l'invio del messaggio di errore al client\n");
+                            cleanupClient(lobby_epoll_fd, client_s);
+                            continue; // Continua ad accettare altri messaggi
+                        }
                         Msg *error_msg = createMsg(MSG_ERROR_UNEXPECTED_MESSAGE, 0, "");
                         sendMsg(client_s, error_msg);
-                        freeMsg(error_msg);
                         break;
                 }
-
-                freeMsg(received_msg);
-                freePayloadNodes(payload);
+                
             }
         }
     }

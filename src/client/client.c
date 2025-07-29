@@ -75,31 +75,36 @@ int main(int argc, char *argv[]){
     }
 
 
-    // creo il messaggio di login
-    PayloadNode *payload = (PayloadNode *)updatePayload(NULL, "username", user);
-    Msg *msg = createMsg(MSG_LOGIN, HEADER_SIZE + strlen(user) + 1, serializePayload(payload));
-    sendMsg(conn_s, msg);
+    // effettuo il login (MSG_LOGIN)
+    PayloadNode *loginPayload = (PayloadNode *)updatePayload(NULL, "username", user);
+    if(safeSendMsg(conn_s, MSG_LOGIN, loginPayload) < 0){
+        fprintf(stderr, "Errore durante l'invio del messaggio di login al server\n");
+        close(conn_s);
+        exit(EXIT_FAILURE);
+    }
 
-    freeMsg(msg);
-    freePayloadNodes(payload);
+    // attendo la risposta dal server (MSG_WELCOME)
+    uint16_t msg_type;
+    PayloadNode *payload = NULL;
+    if(safeRecvMsg(conn_s, &msg_type, &payload) < 0){
+        fprintf(stderr, "Errore durante la ricezione del messaggio di benvenuto dal server\n");
+        close(conn_s);
+        exit(EXIT_FAILURE);
+    }
 
-
-    Msg *received_msg = recvMsg(conn_s); // Gestisce il messaggio ricevuto dal client
-    payload = parsePayload(received_msg->payload);
-
-    switch(received_msg->header.msgType){
+    switch(msg_type){
         case MSG_WELCOME:
             printf("Benvenuto nel gioco!\n");
             break;
 
         default:
-            fprintf(stderr, "Messaggio non riconosciuto: %d\n", received_msg->header.msgType);
+            fprintf(stderr, "Messaggio non riconosciuto: %d\n", msg_type);
             break;
     }
 
-    freeMsg(received_msg);
     freePayloadNodes(payload);
 
+    
     pause();
 
     close(conn_s);
