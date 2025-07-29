@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <signal.h>
 
 #include <sys/socket.h>     // socket definitions
 #include <sys/types.h>      // socket types
@@ -10,8 +11,11 @@
 #include <netdb.h>
 
 #include "utils/cmdLineParser.h"
+#include "common/protocol.h"
 
 int main(int argc, char *argv[]){
+    signal(SIGPIPE, SIG_IGN);
+
     ArgvParam *allowedArgs = setArgvParams("RVaddress,RVport");
     parseCmdLine(argc, argv, allowedArgs);
 
@@ -21,25 +25,25 @@ int main(int argc, char *argv[]){
     //     printf("%s %d %d (%s)\n", curr->paramName, curr->isParamRequired, curr->isValueRequired, curr->paramValue);
     // }
 
-    char *address = getArgvParamValue("address", allowedArgs);
-    char *port = getArgvParamValue("port", allowedArgs);
+    char *addressString = getArgvParamValue("address", allowedArgs);
+    char *portString = getArgvParamValue("port", allowedArgs);
 
+    char *endPtr;
+    long port = strtol(portString, &endPtr, 0);
+    if ( *endPtr ) {
+        fprintf(stderr, "Porta non riconosciuta.\n");
+        exit(EXIT_FAILURE);
+    }
     
     struct sockaddr_in servaddr;
     memset(&servaddr, 0, sizeof(servaddr));
     servaddr.sin_family = AF_INET;
-
-    char *endPtr;
-    servaddr.sin_port = htons(strtol(port, &endPtr, 0));
-    if(*endPtr){
-        printf("Porta non riconosciuta\n");
-        exit(EXIT_FAILURE);
-    }
+    servaddr.sin_port = htons(port);
 
     struct hostent *he = NULL;
-    if(inet_aton(address, &servaddr.sin_addr) <= 0){
+    if(inet_aton(addressString, &servaddr.sin_addr) <= 0){
 
-        if((he = gethostbyname(address)) == NULL){
+        if((he = gethostbyname(addressString)) == NULL){
             printf("Indirizzo IP non valido, risoluzione nome fallita\n");
             exit(EXIT_FAILURE);
         }
@@ -70,9 +74,36 @@ int main(int argc, char *argv[]){
         user[30] = 0;
     }
 
-    
+
+    // creo il messaggio di login
+    PayloadNode *payload = (PayloadNode *)updatePayload(NULL, "username", user);
+    Msg *msg = createMsg(MSG_LOGIN, HEADER_SIZE + strlen(user) + 1, serializePayload(payload));
+    sendMsg(conn_s, msg);
+
+    freeMsg(msg);
+    freePayloadNodes(payload);
 
 
+    Msg *received_msg = recvMsg(conn_s); // Gestisce il messaggio ricevuto dal client
+    payload = parsePayload(received_msg->payload);
 
+    switch(received_msg->header.msgType){
+        case MSG_WELCOME:
+            printf("Benvenuto nel gioco!\n");
+            break;
+
+        default:
+            fprintf(stderr, "Messaggio non riconosciuto: %d\n", received_msg->header.msgType);
+            break;
+    }
+
+    freeMsg(received_msg);
+    freePayloadNodes(payload);
+
+    pause();
+
+    close(conn_s);
+    freeArgvParams(allowedArgs);
+    return 0;
 
 }
