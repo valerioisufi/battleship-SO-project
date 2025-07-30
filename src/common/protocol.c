@@ -378,7 +378,6 @@ int safeSendMsg(int client_fd, uint16_t msg_type, PayloadNode *payload){
     char *serialized = serializePayload(payload);
     Msg *msg = createMsg(msg_type, strlen(serialized) + 1, serialized);
     if (sendMsg(client_fd, msg) == -1) {
-        fprintf(stderr, "Errore durante l'invio al client %d\n", client_fd);
         freeMsg(msg);
         free(serialized);
         freePayloadNodes(payload);
@@ -403,7 +402,6 @@ int safeSendMsg(int client_fd, uint16_t msg_type, PayloadNode *payload){
 int safeRecvMsg(int client_fd, uint16_t *msg_type_out, PayloadNode **payload_out) {
     Msg *received_msg = recvMsg(client_fd);
     if (received_msg == NULL) {
-        fprintf(stderr, "Errore durante la ricezione del messaggio dal client %d\nChiudo la connessione con il client...\n", client_fd);
         return -1;
     }
 
