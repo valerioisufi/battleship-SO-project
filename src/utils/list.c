@@ -7,13 +7,6 @@
 #include "utils/list.h"
 #include "utils/debug.h"
 
-#define PAGE_SIZE_BITS 8 // 2^8 = 256 elementi per pagina
-#define PAGE_INDEX_BITS 10 // 2^10 = 1024 pagine
-
-#define PAGE_SIZE (1 << PAGE_SIZE_BITS)
-#define MAX_PAGES (1 << PAGE_INDEX_BITS)
-#define MAX_ELEMENTS (MAX_PAGES * PAGE_SIZE)
-
 /**
  * Crea e inizializza un nuovo gestore di lista.
  */
@@ -34,6 +27,30 @@ ListManager *create_list_manager() {
     manager->first_index_free = 0;
     pthread_mutex_init(&manager->mutex, NULL);
     return manager;
+}
+
+/**
+ * Libera tutta la memoria allocata dal ListManager, incluse tutte le pagine e i mutex associati.
+ * Dopo la chiamata, il puntatore manager non sarà più valido.
+ * @param manager Puntatore al gestore della lista da liberare.
+ */
+void free_list_manager(ListManager *manager) {
+    if (!manager) return;
+    for (size_t i = 0; i < MAX_PAGES; i++) {
+        if (manager->pages[i]) {
+            // Distruggi tutti i mutex nei nodi della pagina
+            for(size_t j = 0; j < PAGE_SIZE; j++) {
+                pthread_mutex_destroy(&manager->pages[i][j].mutex);
+                if(manager->pages[i][j].ptr) {
+                    free(manager->pages[i][j].ptr); // Libera i dati puntati
+                }
+            }
+            free(manager->pages[i]);
+        }
+    }
+    free(manager->pages);
+    pthread_mutex_destroy(&manager->mutex);
+    free(manager);
 }
 
 /**
@@ -101,7 +118,7 @@ ListItem *get_node(size_t index, ListManager *manager) {
  * Aggiunge un puntatore alla lista, restituendo il nodo che lo contiene.
  * Usa il mutex della lista per garantire l'accesso sicuro alla free-list.
  */
-static ListItem *add_node(ListManager *manager, void *ptr) {
+ListItem *add_node(ListManager *manager, void *ptr) {
     pthread_mutex_lock(&manager->mutex);
     
     size_t node_index = manager->first_index_free;
@@ -127,7 +144,7 @@ static ListItem *add_node(ListManager *manager, void *ptr) {
  * 
  * Questa funzione NON libera la memoria puntata da `node->ptr`.
  */
-static void release_node(ListManager *manager, size_t index) {
+void release_node(ListManager *manager, size_t index) {
     pthread_mutex_lock(&manager->mutex);
 
     ListItem *node = get_node_nolock(index, manager);
