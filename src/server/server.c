@@ -15,12 +15,17 @@
 #include <errno.h>
 
 #include "utils/cmdLineParser.h"
+#include "utils/debug.h"
 #include "common/protocol.h"
+#include "server/users.h"
+#include "server/lobbyManager.h"
 
 void *lobby_thread_main(void *arg);
 
 int main(int argc, char *argv[]){
     signal(SIGPIPE, SIG_IGN);
+
+    init_lists();
 
     ArgvParam *allowedArgs = setArgvParams("RVport");
     parseCmdLine(argc, argv, allowedArgs);
@@ -30,7 +35,7 @@ int main(int argc, char *argv[]){
     char *endPtr;
     long port = strtol(portString, &endPtr, 0);
     if ( *endPtr ) {
-        fprintf(stderr, "Porta non riconosciuta.\n");
+        LOG_ERROR("Porta non riconosciuta.");
         exit(EXIT_FAILURE);
     }
 
@@ -44,26 +49,26 @@ int main(int argc, char *argv[]){
     /*  Create the listening socket  */
     int list_s;
     if((list_s = socket(AF_INET, SOCK_STREAM, 0)) < 0){
-        fprintf(stderr, "Errore nella creazione della socket.\n");
-	    exit(EXIT_FAILURE);
+        LOG_ERROR("Errore nella creazione della socket.");
+        exit(EXIT_FAILURE);
     }
 
     int optval = 1;
     if (setsockopt(list_s, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) < 0) {
-        perror("setsockopt SO_REUSEADDR");
+        LOG_DEBUG_ERROR("Errore in setsockopt SO_REUSEADDR");
         exit(EXIT_FAILURE);
     }
 
     /*  Bind our socket addresss to the 
-	listening socket, and call listen()  */
+    listening socket, and call listen()  */
     if (bind(list_s, (struct sockaddr *) &servaddr, sizeof(servaddr)) < 0 ) {
-		fprintf(stderr, "server: errore durante la bind.\n");
-		exit(EXIT_FAILURE);
+        LOG_ERROR("Errore durante la bind.");
+        exit(EXIT_FAILURE);
     }
 
     if(listen(list_s, 1024) < 0) {
-		fprintf(stderr, "Errore durante la listen.\n");
-		exit(EXIT_FAILURE);
+        LOG_ERROR("Errore durante la listen.");
+        exit(EXIT_FAILURE);
     }
 
 
@@ -71,17 +76,17 @@ int main(int argc, char *argv[]){
     // Il thread della lobby gestirà le connessioni dei client
     int lobby_pipe[2];
     if (pipe(lobby_pipe) == -1) {
-        perror("pipe");
+        LOG_ERROR("Errore nella creazione della pipe.");
         exit(EXIT_FAILURE);
     }
 
     pthread_t lobby_thread_id;
     if (pthread_create(&lobby_thread_id, NULL, lobby_thread_main, &lobby_pipe[0]) != 0) {
-        perror("pthread_create lobby");
+        LOG_ERROR("Errore durante la creazione del thread della lobby.");
         exit(EXIT_FAILURE);
     }
 
-    printf("Server in attesa di connessioni...\n");
+    LOG_INFO("Server in attesa di connessioni...");
 
     int conn_s;
     struct sockaddr_in their_addr;
@@ -92,109 +97,17 @@ int main(int argc, char *argv[]){
     // per gestire la comunicazione con il client.
     while (1) {
         if ((conn_s = accept(list_s, (struct sockaddr*)&their_addr, &sin_size)) < 0) {
-            fprintf(stderr, "accept");
+            LOG_ERROR("Errore durante l'accept.");
             continue; // Continua ad accettare altre connessioni
         }
 
-        printf("Connessione da %s\n", inet_ntoa(their_addr.sin_addr));
+        LOG_INFO("Connessione da %s", inet_ntoa(their_addr.sin_addr));
         // Passa il nuovo file descriptor al thread lobby scrivendo sulla pipe
         if (write(lobby_pipe[1], &conn_s, sizeof(conn_s)) == -1) {
-            perror("write to lobby pipe");
+            LOG_ERROR("Errore durante la scrittura sulla pipe della lobby.");
         }
     }
 
 
 }
 
-
-/**
- * Rimuove un client dal set epoll e chiude la relativa socket.
- * Utile per gestire la disconnessione e il cleanup di risorse associate a un client.
- * @param epoll_fd File descriptor dell'epoll.
- * @param client_fd File descriptor della socket del client da chiudere.
- */
-void cleanupClient(int epoll_fd, int client_fd) {
-    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
-    close(client_fd);
-}
-
-#define MAX_EVENTS 128
-void *lobby_thread_main(void *arg) {
-    int lobby_pipe_fd = *(int *)arg;
-
-    int lobby_epoll_fd = epoll_create1(0);
-
-    struct epoll_event ev;
-    ev.events = EPOLLIN;
-    ev.data.fd = lobby_pipe_fd;
-    epoll_ctl(lobby_epoll_fd, EPOLL_CTL_ADD, lobby_pipe_fd, &ev);
-
-    while (1) {
-        struct epoll_event events[MAX_EVENTS];
-        int nfds = epoll_wait(lobby_epoll_fd, events, MAX_EVENTS, -1);
-
-        for(int n = 0; n < nfds; n++){
-            if(events[n].data.fd == lobby_pipe_fd) {
-                int new_conn_s;
-                if (read(lobby_pipe_fd, &new_conn_s, sizeof(new_conn_s)) == -1) {
-                    perror("read from lobby pipe");
-                    continue; // Continua ad accettare altre connessioni
-                }
-
-                ev.events = EPOLLIN;
-                ev.data.fd = new_conn_s;
-                epoll_ctl(lobby_epoll_fd, EPOLL_CTL_ADD, new_conn_s, &ev);
-
-            }else{
-                int client_s = events[n].data.fd;
-
-                uint16_t msg_type;
-                PayloadNode *payload = NULL;
-                if(safeRecvMsg(client_s, &msg_type, &payload) < 0){
-                    fprintf(stderr, "Errore durante la ricezione del messaggio di benvenuto dal server\n");
-                    cleanupClient(lobby_epoll_fd, client_s);
-                    continue; // Continua ad accettare altri messaggi
-                }
-
-                switch(msg_type){
-                    case MSG_LOGIN:
-                        // Gestione del login
-                        char *username = getPayloadValue(payload, "username");
-                        freePayloadNodes(payload);
-
-                        if (username) {
-                            printf("Utente %s si è connesso.\n", username);
-                            if(safeSendMsg(client_s, MSG_WELCOME, NULL) < 0){
-                                fprintf(stderr, "Errore durante l'invio del messaggio di benvenuto a %s.\n", username);
-                                cleanupClient(lobby_epoll_fd, client_s);
-                                free(username);
-                                continue; // Continua ad accettare altri messaggi
-                            }
-
-                            printf("Messaggio di benvenuto inviato a %s.\n", username);
-                            free(username);
-                        } else {
-                            fprintf(stderr, "Messaggio di login non valido.\n");
-                        }
-                        break;
-
-                    default:
-                        freePayloadNodes(payload);
-
-                        fprintf(stderr, "Messaggio non riconosciuto: %d\n", msg_type);
-                        if(safeSendMsg(client_s, MSG_ERROR_UNEXPECTED_MESSAGE, NULL) < 0){
-                            fprintf(stderr, "Errore durante l'invio del messaggio di errore al client\n");
-                            cleanupClient(lobby_epoll_fd, client_s);
-                            continue; // Continua ad accettare altri messaggi
-                        }
-                        Msg *error_msg = createMsg(MSG_ERROR_UNEXPECTED_MESSAGE, 0, "");
-                        sendMsg(client_s, error_msg);
-                        break;
-                }
-                
-            }
-        }
-    }
-
-    return NULL;
-}

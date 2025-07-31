@@ -14,12 +14,15 @@ typedef struct {
     unsigned int *player_ids;
     unsigned int players_capacity; // Capacità attuale dell'array dei giocatori
     unsigned int players_count; // Numero attuale di giocatori nella partita
+
+    int game_pipe_fd;
 } Game;
 
 void init_lists();
 
 int create_user(const char *username, int socket_fd);
 void remove_user(unsigned int user_id);
+void free_user(User *user);
 int update_user_socket_fd(unsigned int user_id, int socket_fd);
 int get_user_socket_fd(unsigned int user_id);
 int update_user_username(unsigned int user_id, const char *username);
@@ -29,5 +32,6 @@ unsigned int get_user_game_id(unsigned int user_id);
 
 int create_game(const char *game_name, unsigned int owner_id);
 void remove_game(unsigned int game_id);
+void free_game(Game *game);
 int add_player_to_game(unsigned int game_id, unsigned int player_id);
 int remove_player_from_game(unsigned int game_id, unsigned int player_id);

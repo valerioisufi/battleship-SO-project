@@ -2,12 +2,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <uuid/uuid.h>
+#include <stdint.h>
 
 #include <pthread.h>
 
 #include "users.h"
 #include "utils/debug.h"
 #include "utils/list.h"
+#include "server/gameManager.h"
 
 ListManager *users_list = NULL;
 ListManager *games_list = NULL;
@@ -66,8 +68,7 @@ void remove_user(unsigned int user_id) {
     
     User *user_data = (User *)node->ptr;
     if (user_data) {
-        free(user_data->username);
-        free(user_data);
+        free_user(user_data);
         node->ptr = NULL;
     }
     
@@ -75,6 +76,16 @@ void remove_user(unsigned int user_id) {
     
     // Ora che i dati sono stati liberati, rimetti il nodo nella free list
     release_node(users_list, user_id);
+}
+
+/**
+ * Libera le risorse associate a un utente.
+ * @param user Puntatore all'utente da liberare.
+ */
+void free_user(User *user) {
+    if (!user) return;
+    free(user->username);
+    free(user);
 }
 
 /**
@@ -147,7 +158,7 @@ int update_user_username(unsigned int user_id, const char *new_username) {
 }
 
 /**
- * Ottiene il nome utente associato a un ID utente.
+ * Ottiene il nome utente associato a un ID utente. La stringa restituita va liberata dal chiamante con free().
  * @param user_id ID dell'utente di cui ottenere il nome.
  * @return Nome dell'utente, o NULL se l'utente non esiste.
  */
@@ -159,7 +170,9 @@ char *get_username_by_id(unsigned int user_id) {
 
     if (node->ptr) {
         User *user = (User *)node->ptr;
-        username = strdup(user->username);
+        if(user->username) {
+            username = strdup(user->username);
+        }
     }
 
     pthread_mutex_unlock(&node->mutex);
@@ -193,9 +206,9 @@ int update_user_game_id(unsigned int user_id, unsigned int game_id) {
  * @param user_id ID dell'utente di cui ottenere l'ID della partita.
  * @return ID della partita associata all'utente, o 0 se l'utente non è in una partita.
  */
-int get_user_game_id(unsigned int user_id) {
+unsigned int get_user_game_id(unsigned int user_id) {
     ListItem *node = get_node(user_id, users_list);
-    int game_id = 0;
+    unsigned int game_id = 0;
 
     pthread_mutex_lock(&node->mutex);
     
@@ -234,7 +247,30 @@ int create_game(const char *game_name, unsigned int owner_id) {
         free(new_game);
         return -1;
     }
-    
+
+    int game_pipe[2];
+    if (pipe(game_pipe) == -1) {
+        free(new_game->player_ids);
+        free(new_game->game_name);
+        free(new_game);
+        return -1;
+    }
+    new_game->game_pipe_fd = game_pipe[1];
+
+    pthread_t thread_id;
+    if (pthread_create(&thread_id, NULL, game_thread, (void *)(intptr_t)game_pipe[0]) != 0) {
+        LOG_DEBUG_ERROR("Errore durante la creazione del thread di gioco per la partita %d.\n", new_game->game_id);
+
+        free(new_game->player_ids);
+        free(new_game->game_name);
+        free(new_game);
+        close(game_pipe[0]);
+        close(game_pipe[1]);
+        return -1;
+    }
+    pthread_detach(thread_id);
+
+
     ListItem *node = add_node(games_list, new_game);
     new_game->game_id = node->index;
     
@@ -255,15 +291,26 @@ void remove_game(unsigned int game_id) {
     
     Game *game_data = (Game *)node->ptr;
     if (game_data) {
-        free(game_data->game_name);
-        free(game_data->player_ids);
-        free(game_data);
+        // TODO aggiungere logica per terminare il thread di gioco se necessario
+        free_game(game_data);
         node->ptr = NULL;
     }
     
     pthread_mutex_unlock(&node->mutex);
     
     release_node(games_list, game_id);
+}
+
+/**
+ * Libera le risorse associate a una partita.
+ * @param game Puntatore alla partita da liberare.
+ */
+void free_game(Game *game) {
+    if (!game) return;
+    close(game->game_pipe_fd);
+    free(game->game_name);
+    free(game->player_ids);
+    free(game);
 }
 
 /**
@@ -298,6 +345,12 @@ int add_player_to_game(unsigned int game_id, unsigned int player_id) {
         // Aggiungi il giocatore
         game->player_ids[game->players_count] = player_id;
         game->players_count++;
+
+        if (write(game->game_pipe_fd, &player_id, sizeof(player_id)) == -1) {
+            LOG_ERROR("Errore durante la scrittura sulla pipe della partita.");
+        }
+
+        LOG_DEBUG("Giocatore %d aggiunto alla partita %d.\n", player_id, game_id);
         success = 0;
     }
     

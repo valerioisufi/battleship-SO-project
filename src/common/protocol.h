@@ -1,3 +1,6 @@
+#ifndef PROTOCOL_H
+#define PROTOCOL_H
+
 #include <stdint.h>
 
 typedef enum {
@@ -11,7 +14,6 @@ typedef enum {
 typedef enum {
     MSG_WELCOME,
     MSG_GAMES_LIST,
-    MSG_ERROR_CREATE_GAME,
     MSG_GAME_CREATED,
     MSG_GAME_JOINED,
     MSG_GAME_STARTED,
@@ -20,8 +22,11 @@ typedef enum {
     MSG_PLAYER_ACTION,
     MSG_GAME_STATE_UPDATE,
     MSG_YOUR_TURN,
+    MSG_ERROR_CREATE_GAME,
+    MSG_ERROR_NOT_YOUR_TURN,
+    MSG_ERROR_NOT_AUTHENTICATED,
     MSG_ERROR_UNEXPECTED_MESSAGE,
-    MSG_ERROR_NOT_YOUR_TURN
+    MSG_ERROR_MALFORMED_MESSAGE
 } GameMsgType;
 
 
@@ -60,3 +65,5 @@ void freePayloadNodes(PayloadNode *head);
 
 int safeSendMsg(int client_fd, uint16_t msg_type, PayloadNode *payload);
 int safeRecvMsg(int client_fd, uint16_t *msg_type_out, PayloadNode **payload_out);
+
+#endif // PROTOCOL_H
