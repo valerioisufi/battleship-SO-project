@@ -23,6 +23,9 @@ typedef enum {
     MSG_GAME_STATE_UPDATE,
     MSG_YOUR_TURN,
     MSG_ERROR_CREATE_GAME,
+    MSG_ERROR_JOIN_GAME,
+    MSG_ERROR_START_GAME,
+    MSG_ERROR_PLAYER_ACTION,
     MSG_ERROR_NOT_YOUR_TURN,
     MSG_ERROR_NOT_AUTHENTICATED,
     MSG_ERROR_UNEXPECTED_MESSAGE,
@@ -49,6 +52,7 @@ typedef struct _PayloadNode {
     struct _PayloadNode *next;
 } PayloadNode;
 
+// TODO introdurre una gestione del payload come array di dictionary
 
 Msg *recvMsg(int socket_fd);
 int sendMsg(int socket_fd, Msg *msg);

@@ -25,10 +25,13 @@
  * Utile per gestire la disconnessione e il cleanup di risorse associate a un client.
  * @param epoll_fd File descriptor dell'epoll.
  * @param client_fd File descriptor della socket del client da chiudere.
+ * @param user_id ID dell'utente da rimuovere.
  */
-void cleanupClient(int epoll_fd, int client_fd) {
+void cleanup_client_lobby(int epoll_fd, int client_fd, unsigned int user_id) {
     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
     close(client_fd);
+    remove_user(user_id); // Rimuove l'utente dalla lista degli utenti
+    LOG_INFO("Utente %d disconnesso e rimosso.\n", user_id);
 }
 
 
@@ -38,7 +41,6 @@ void cleanupClient(int epoll_fd, int client_fd) {
 #define MAX_EVENTS 128
 void *lobby_thread_main(void *arg) {
     int lobby_pipe_fd = *(int *)arg;
-
     int lobby_epoll_fd = epoll_create1(0);
 
     struct epoll_event ev;
@@ -54,13 +56,13 @@ void *lobby_thread_main(void *arg) {
             if(events[n].data.u64 == UINT64_MAX) {
                 int new_conn_s;
                 if (read(lobby_pipe_fd, &new_conn_s, sizeof(new_conn_s)) == -1) {
-                    LOG_ERROR("read from lobby pipe");
+                    LOG_ERROR("Errore durante la lettura dalla pipe della lobby");
                     continue; // Continua ad accettare altre connessioni
                 }
 
                 int user_id = create_user(NULL, new_conn_s);
                 if(user_id < 0) {
-                    LOG_WARNING("Errore nella creazione dell'utente per la connessione %d.\n", new_conn_s);
+                    LOG_WARNING("Errore nella creazione dell'utente per la connessione %d", new_conn_s);
                     close(new_conn_s);
                     continue; // Continua ad accettare altre connessioni
                 }
@@ -72,12 +74,16 @@ void *lobby_thread_main(void *arg) {
             }else{
                 int user_id = events[n].data.u64;
                 int client_s = get_user_socket_fd(user_id);
+                if (client_s < 0) {
+                    LOG_WARNING("Errore nell'ottenimento della socket per il giocatore %d", user_id);
+                    continue; // Continua ad accettare altri messaggi
+                }
 
                 uint16_t msg_type;
                 PayloadNode *payload = NULL;
                 if(safeRecvMsg(client_s, &msg_type, &payload) < 0){
-                    LOG_MSG_ERROR("Errore durante la ricezione del messaggio dal client %d, procedo a chiuderne la connessione...\n", client_s);
-                    cleanupClient(lobby_epoll_fd, client_s);
+                    LOG_MSG_ERROR("Errore durante la ricezione del messaggio dal client %d, procedo a chiuderne la connessione...", client_s);
+                    cleanup_client_lobby(lobby_epoll_fd, client_s, user_id);
                     continue; // Continua ad accettare altri messaggi
                 }
 
@@ -94,11 +100,12 @@ void *lobby_thread_main(void *arg) {
 
                     case MSG_JOIN_GAME:
                         // Gestione dell'unione a una partita
+                        LOG_DEBUG("Il giocatore %d ha inviato un messaggio di unione a una partita", user_id);
                         on_join_game_msg(lobby_epoll_fd, user_id, client_s, payload);
                         break;
                         
                     default:
-                        on_unexpected_msg(lobby_epoll_fd, user_id, msg_type);
+                        on_unexpected_msg(lobby_epoll_fd, user_id, client_s, msg_type);
                         break;
                 }
 
@@ -124,25 +131,25 @@ void on_login_msg(int lobby_epoll_fd, unsigned int user_id, int client_s, Payloa
     char *username = getPayloadValue(payload, "username");
 
     if (username) {
-        LOG_INFO("Utente %s si è connesso.\n", username);
+        LOG_INFO("Utente `%s` si è connesso", username);
 
         if(update_user_username(user_id, username) < 0){
-            LOG_ERROR("Errore durante l'aggiornamento del nome utente per l'utente %d.\n", user_id);
-            cleanupClient(lobby_epoll_fd, client_s);
+            LOG_ERROR("Errore durante l'aggiornamento del nome utente per l'utente %d", user_id);
+            cleanup_client_lobby(lobby_epoll_fd, client_s, user_id);
             free(username);
             goto cleanup;
         }
 
         if(safeSendMsg(client_s, MSG_WELCOME, NULL) < 0){
-            LOG_MSG_ERROR("Errore durante l'invio del messaggio di benvenuto a %s.\n", username);
-            cleanupClient(lobby_epoll_fd, client_s);
+            LOG_MSG_ERROR("Errore durante l'invio del messaggio di benvenuto a `%s`", username);
+            cleanup_client_lobby(lobby_epoll_fd, client_s, user_id);
             goto cleanup;
         }
 
-        LOG_INFO("Messaggio di benvenuto inviato a %s.\n", username);
+        LOG_INFO("Messaggio di benvenuto inviato a `%s`", username);
     } else {
-        LOG_WARNING("Messaggio di login non valido.\n");
-        on_malformed_msg(lobby_epoll_fd, client_s);
+        LOG_WARNING("Messaggio di login non valido, nome utente mancante");
+        on_malformed_msg(lobby_epoll_fd, user_id, client_s);
     }
 
 
@@ -171,23 +178,28 @@ void on_create_game_msg(int lobby_epoll_fd, unsigned int user_id, int client_s, 
         int game_id = create_game(game_name, user_id);
 
         if(game_id < 0){
-            LOG_ERROR("Errore durante la creazione della partita per l'utente %s.\n", username);
+            LOG_ERROR("Errore durante la creazione della partita per l'utente `%s`", username);
             if(safeSendMsg(client_s, MSG_ERROR_CREATE_GAME, NULL) < 0){
-                LOG_MSG_ERROR("Errore durante l'invio del messaggio di errore al client %s.\n", username);
-                cleanupClient(lobby_epoll_fd, client_s);
+                LOG_MSG_ERROR("Errore durante l'invio del messaggio di errore al client `%s`", username);
+                cleanup_client_lobby(lobby_epoll_fd, client_s, user_id);
                 goto cleanup;
             }
         } else {
-            LOG_INFO("Partita '%s' creata con ID %d da %s.\n", game_name, game_id, username);
-            if(safeSendMsg(client_s, MSG_GAME_CREATED, NULL) < 0){
-                LOG_MSG_ERROR("Errore durante l'invio del messaggio di partita creata al client %s.\n", username);
-                cleanupClient(lobby_epoll_fd, client_s);
+            LOG_INFO("Partita '%s' creata con ID %d da `%s`", game_name, game_id, username);
+            char buffer[32];
+            snprintf(buffer, sizeof(buffer), "%d", game_id);
+
+            PayloadNode *payload = updatePayload(NULL, "game_id", buffer);
+            if(safeSendMsg(client_s, MSG_GAME_CREATED, payload) < 0){
+                LOG_MSG_ERROR("Errore durante l'invio del messaggio di partita creata al client `%s`", username);
+                cleanup_client_lobby(lobby_epoll_fd, client_s, user_id);
                 goto cleanup;
             }
+            epoll_ctl(lobby_epoll_fd, EPOLL_CTL_DEL, client_s, NULL);
         }
     } else {
-        LOG_WARNING("Nome della partita non fornito.\n");
-        on_malformed_msg(lobby_epoll_fd, client_s);
+        LOG_WARNING("Nome della partita non fornito");
+        on_malformed_msg(lobby_epoll_fd, user_id, client_s);
     }
 
 cleanup:
@@ -217,30 +229,31 @@ void on_join_game_msg(int lobby_epoll_fd, unsigned int user_id, int client_s, Pa
         unsigned long tmp = strtoul(game_id_str, &endptr, 10);
         if (*endptr != '\0' || game_id_str[0] == '\0') {
             // Errore di conversione
-            LOG_WARNING("ID della partita non valido: %s\n", game_id_str);
-            on_malformed_msg(lobby_epoll_fd, client_s);
+            LOG_WARNING("ID della partita non valido: `%s`", game_id_str);
+            on_malformed_msg(lobby_epoll_fd, user_id, client_s);
             goto cleanup;
         }
         unsigned int game_id = (unsigned int)tmp;
 
         if(add_player_to_game(game_id, user_id) == 0){
-            LOG_INFO("Utente %d si è unito alla partita %d.\n", user_id, game_id);
+            LOG_INFO("Utente %d:`%s` si è unito alla partita `%d`", user_id, username, game_id);
             if(safeSendMsg(client_s, MSG_GAME_JOINED, NULL) < 0){
-                LOG_MSG_ERROR("Errore durante l'invio del messaggio di partita unita al client %d.\n", user_id);
-                cleanupClient(lobby_epoll_fd, client_s);
+                LOG_MSG_ERROR("Errore durante l'invio del messaggio di partita unita al client %d:`%s`", user_id, username);
+                cleanup_client_lobby(lobby_epoll_fd, client_s, user_id);
                 goto cleanup;
             }
+            epoll_ctl(lobby_epoll_fd, EPOLL_CTL_DEL, client_s, NULL);
         } else {
-            LOG_ERROR("Errore durante l'unione alla partita %d per l'utente %d.\n", game_id, user_id);
-            if(safeSendMsg(client_s, MSG_ERROR_UNEXPECTED_MESSAGE, NULL) < 0){
-                LOG_MSG_ERROR("Errore durante l'invio del messaggio di errore al client %d.\n", user_id);
-                cleanupClient(lobby_epoll_fd, client_s);
+            LOG_ERROR("Errore durante l'unione alla partita %d per l'utente %d.`%s`", game_id, user_id, username);
+            if(safeSendMsg(client_s, MSG_ERROR_JOIN_GAME, NULL) < 0){
+                LOG_MSG_ERROR("Errore durante l'invio del messaggio di errore al client %d:`%s`", user_id, username);
+                cleanup_client_lobby(lobby_epoll_fd, client_s, user_id);
                 goto cleanup;
             }
         }
     } else {
         LOG_WARNING("ID della partita non fornito.\n");
-        on_malformed_msg(lobby_epoll_fd, client_s);
+        on_malformed_msg(lobby_epoll_fd, user_id, client_s);
         goto cleanup;
     }
 
@@ -262,10 +275,10 @@ char *require_authentication(int lobby_epoll_fd, unsigned int user_id, int clien
     char *username = get_username_by_id(user_id);
 
     if(!username){
-        LOG_WARNING("Client %d non autenticato\n", client_s);
+        LOG_WARNING("Client %d non autenticato", client_s);
         if(safeSendMsg(client_s, MSG_ERROR_NOT_AUTHENTICATED, NULL) < 0){
-            LOG_MSG_ERROR("Errore durante l'invio del messaggio di errore al client %d.\n", client_s);
-            cleanupClient(lobby_epoll_fd, client_s);
+            LOG_MSG_ERROR("Errore durante l'invio del messaggio di errore al client %d", client_s);
+            cleanup_client_lobby(lobby_epoll_fd, client_s, user_id);
         }
     }
     return username;
@@ -279,11 +292,11 @@ char *require_authentication(int lobby_epoll_fd, unsigned int user_id, int clien
  * @param client_s File descriptor della socket del client.
  * @return 0 se l'operazione è andata a buon fine, -1 in caso di errore.
  */
-int on_malformed_msg(int lobby_epoll_fd, int client_s) {
+int on_malformed_msg(int lobby_epoll_fd, unsigned int user_id, int client_s) {
     // LOG_WARNING("Messaggio malformato ricevuto dal client %d.\n", client_s);
     if(safeSendMsg(client_s, MSG_ERROR_MALFORMED_MESSAGE, NULL) < 0){
-        LOG_MSG_ERROR("Errore durante l'invio del messaggio di errore al client %d.\n", client_s);
-        cleanupClient(lobby_epoll_fd, client_s);
+        LOG_MSG_ERROR("Errore durante l'invio del messaggio di errore al client %d", client_s);
+        cleanup_client_lobby(lobby_epoll_fd, client_s, user_id);
         return -1;
     }
     return 0;
@@ -293,13 +306,14 @@ int on_malformed_msg(int lobby_epoll_fd, int client_s) {
  * Gestisce un messaggio non riconosciuto ricevuto da un client.
  * Invia un messaggio di errore e chiude la connessione del client in caso di errore.
  * @param lobby_epoll_fd File descriptor dell'epoll della lobby.
+ * @param user_id ID dell'utente che ha inviato il messaggio non riconosciuto.
  * @param client_s File descriptor della socket del client.
  * @param msg_type Tipo del messaggio non riconosciuto.
  */
-void on_unexpected_msg(int lobby_epoll_fd, int client_s, uint16_t msg_type){
-    LOG_WARNING("Messaggio non riconosciuto: %d\n", msg_type);
+void on_unexpected_msg(int lobby_epoll_fd, unsigned int user_id, int client_s, uint16_t msg_type){
+    LOG_WARNING("Messaggio non riconosciuto: %d", msg_type);
     if(safeSendMsg(client_s, MSG_ERROR_UNEXPECTED_MESSAGE, NULL) < 0){
-        LOG_MSG_ERROR("Errore durante l'invio del messaggio di errore al client %d.\n", client_s);
-        cleanupClient(lobby_epoll_fd, client_s);
+        LOG_MSG_ERROR("Errore durante l'invio del messaggio di errore al client %d", client_s);
+        cleanup_client_lobby(lobby_epoll_fd, client_s, user_id);
     }
 }

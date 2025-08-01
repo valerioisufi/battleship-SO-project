@@ -257,10 +257,37 @@ int create_game(const char *game_name, unsigned int owner_id) {
     }
     new_game->game_pipe_fd = game_pipe[1];
 
-    pthread_t thread_id;
-    if (pthread_create(&thread_id, NULL, game_thread, (void *)(intptr_t)game_pipe[0]) != 0) {
-        LOG_DEBUG_ERROR("Errore durante la creazione del thread di gioco per la partita %d.\n", new_game->game_id);
+    ListItem *node = add_node(games_list, new_game);
+    new_game->game_id = node->index;
 
+    pthread_t thread_id;
+    GameThreadArg *game_arg = (GameThreadArg *)malloc(sizeof(GameThreadArg));
+    if (!game_arg) {
+        free(new_game->player_ids);
+        free(new_game->game_name);
+        free(new_game);
+        close(game_pipe[0]);
+        close(game_pipe[1]);
+        return -1;
+    }
+    game_arg->game_id = new_game->game_id; // L'ID sarà assegnato dopo
+    game_arg->game_name = strdup(game_name);
+    if (!game_arg->game_name) {
+        free(game_arg);
+        free(new_game->player_ids);
+        free(new_game->game_name);
+        free(new_game);
+        close(game_pipe[0]);
+        close(game_pipe[1]);
+        return -1;
+    }
+    game_arg->game_pipe_fd = game_pipe[0];
+
+    if (pthread_create(&thread_id, NULL, game_thread, (void *)game_arg) != 0) {
+        LOG_DEBUG_ERROR("Errore durante la creazione del thread di gioco per la partita %d", new_game->game_id);
+
+        free(game_arg->game_name);
+        free(game_arg);
         free(new_game->player_ids);
         free(new_game->game_name);
         free(new_game);
@@ -269,10 +296,6 @@ int create_game(const char *game_name, unsigned int owner_id) {
         return -1;
     }
     pthread_detach(thread_id);
-
-
-    ListItem *node = add_node(games_list, new_game);
-    new_game->game_id = node->index;
     
     // Aggiunge il creatore come primo giocatore
     add_player_to_game(new_game->game_id, owner_id);
@@ -347,10 +370,12 @@ int add_player_to_game(unsigned int game_id, unsigned int player_id) {
         game->players_count++;
 
         if (write(game->game_pipe_fd, &player_id, sizeof(player_id)) == -1) {
-            LOG_ERROR("Errore durante la scrittura sulla pipe della partita.");
+            LOG_ERROR("Errore durante la scrittura sulla pipe della partita");
         }
 
-        LOG_DEBUG("Giocatore %d aggiunto alla partita %d.\n", player_id, game_id);
+        update_user_game_id(player_id, game_id);
+
+        LOG_DEBUG("Giocatore %d aggiunto alla partita %d", player_id, game_id);
         success = 0;
     }
     
@@ -379,4 +404,21 @@ int remove_player_from_game(unsigned int game_id, unsigned int player_id) {
     
     pthread_mutex_unlock(&node->mutex);
     return success;
+}
+
+/**
+ * Ottiene l'ID del proprietario della partita.
+ * @param game_id ID della partita di cui ottenere il proprietario.
+ * @return ID del proprietario della partita, o -1 se la partita non esiste.
+ */
+ int get_game_owner_id(unsigned int game_id) {
+    ListItem *node = get_node(game_id, games_list);
+    int owner_id = -1;
+    if (node) {
+        Game *game = (Game *)node->ptr;
+        if (game) {
+            owner_id = game->owner_id;
+        }
+    }
+    return owner_id;
 }

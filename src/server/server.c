@@ -35,7 +35,7 @@ int main(int argc, char *argv[]){
     char *endPtr;
     long port = strtol(portString, &endPtr, 0);
     if ( *endPtr ) {
-        LOG_ERROR("Porta non riconosciuta.");
+        LOG_ERROR("Porta non riconosciuta");
         exit(EXIT_FAILURE);
     }
 
@@ -49,7 +49,7 @@ int main(int argc, char *argv[]){
     /*  Create the listening socket  */
     int list_s;
     if((list_s = socket(AF_INET, SOCK_STREAM, 0)) < 0){
-        LOG_ERROR("Errore nella creazione della socket.");
+        LOG_ERROR("Errore nella creazione della socket");
         exit(EXIT_FAILURE);
     }
 
@@ -62,12 +62,12 @@ int main(int argc, char *argv[]){
     /*  Bind our socket addresss to the 
     listening socket, and call listen()  */
     if (bind(list_s, (struct sockaddr *) &servaddr, sizeof(servaddr)) < 0 ) {
-        LOG_ERROR("Errore durante la bind.");
+        LOG_ERROR("Errore durante la bind");
         exit(EXIT_FAILURE);
     }
 
     if(listen(list_s, 1024) < 0) {
-        LOG_ERROR("Errore durante la listen.");
+        LOG_ERROR("Errore durante la listen");
         exit(EXIT_FAILURE);
     }
 
@@ -76,13 +76,13 @@ int main(int argc, char *argv[]){
     // Il thread della lobby gestirà le connessioni dei client
     int lobby_pipe[2];
     if (pipe(lobby_pipe) == -1) {
-        LOG_ERROR("Errore nella creazione della pipe.");
+        LOG_ERROR("Errore nella creazione della pipe della lobby");
         exit(EXIT_FAILURE);
     }
 
     pthread_t lobby_thread_id;
     if (pthread_create(&lobby_thread_id, NULL, lobby_thread_main, &lobby_pipe[0]) != 0) {
-        LOG_ERROR("Errore durante la creazione del thread della lobby.");
+        LOG_ERROR("Errore durante la creazione del thread della lobby");
         exit(EXIT_FAILURE);
     }
 
@@ -97,14 +97,14 @@ int main(int argc, char *argv[]){
     // per gestire la comunicazione con il client.
     while (1) {
         if ((conn_s = accept(list_s, (struct sockaddr*)&their_addr, &sin_size)) < 0) {
-            LOG_ERROR("Errore durante l'accept.");
+            LOG_ERROR("Errore durante l'accept");
             continue; // Continua ad accettare altre connessioni
         }
 
         LOG_INFO("Connessione da %s", inet_ntoa(their_addr.sin_addr));
         // Passa il nuovo file descriptor al thread lobby scrivendo sulla pipe
         if (write(lobby_pipe[1], &conn_s, sizeof(conn_s)) == -1) {
-            LOG_ERROR("Errore durante la scrittura sulla pipe della lobby.");
+            LOG_ERROR("Errore durante la scrittura sulla pipe della lobby");
         }
     }
 

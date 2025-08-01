@@ -7,6 +7,12 @@
 #include "game.h"
 #include "utils/debug.h"
 
+/**
+ * Crea e inizializza lo stato di una partita.
+ * @param game_id ID della partita.
+ * @param game_name Nome della partita.
+ * @return Puntatore a GameState se la creazione è riuscita, NULL altrimenti.
+ */
 GameState *create_game_state(unsigned int game_id, const char *game_name) {
     GameState *game = (GameState *)malloc(sizeof(GameState));
     if (!game) {
@@ -42,7 +48,7 @@ GameState *create_game_state(unsigned int game_id, const char *game_name) {
  * @param player_id ID del giocatore da aggiungere.
  * @return 0 se il giocatore è stato aggiunto con successo, -1 in caso di errore.
  */
-int add_player_to_game(GameState *game, int player_id, char *username) {
+int add_player_to_game_state(GameState *game, int player_id, char *username) {
     if(game == NULL || game->players == NULL) {
         fprintf(stderr, "add_player_to_game: game or players array is NULL\n");
         return -1;
@@ -74,6 +80,8 @@ int add_player_to_game(GameState *game, int player_id, char *username) {
         return -1;
     }
     game->players_count++;
+
+    init_board(&game->players[game->players_count - 1].board); // Inizializza la griglia di gioco del nuovo giocatore
     return 0;
 }
 
@@ -84,7 +92,8 @@ int add_player_to_game(GameState *game, int player_id, char *username) {
  * @param player_id ID del giocatore da rimuovere.
  * @return 0 se il giocatore è stato rimosso con successo, -1 se il giocatore non è stato trovato.
  */
-int remove_player_from_game(GameState *game, unsigned int player_id) {
+int remove_player_from_game_state(GameState *game, unsigned int player_id) {
+    // TODO dovrei evitare di rimuovere il giocatore per permettere la riconnessione e per mantenere l'ordine di inserimento
     if(game == NULL || game->players == NULL) {
         fprintf(stderr, "remove_player_from_game: game or players array is NULL\n");
         return -1;
@@ -100,6 +109,27 @@ int remove_player_from_game(GameState *game, unsigned int player_id) {
     }
     
     return -1; // Giocatore non trovato
+}
+
+/**
+ * Ottiene lo stato di un giocatore della partita.
+ * @param game Puntatore alla struttura GameState della partita.
+ * @param player_id ID del giocatore di cui ottenere lo stato.
+ * @return Puntatore a PlayerState se il giocatore è trovato, NULL altrimenti.
+ */
+PlayerState *get_player_state(GameState *game, unsigned int player_id) {
+    if (game == NULL || game->players == NULL) {
+        fprintf(stderr, "get_player_state: game or players array is NULL\n");
+        return NULL;
+    }
+
+    for (unsigned int i = 0; i < game->players_count; i++) {
+        if (game->players[i].user_id == player_id) {
+            return &game->players[i];
+        }
+    }
+
+    return NULL; // Giocatore non trovato
 }
 
 int init_board(GameBoard *board) {

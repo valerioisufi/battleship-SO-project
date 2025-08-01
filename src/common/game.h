@@ -14,16 +14,20 @@ typedef struct {
 } PlayerState;
 
 typedef struct {
-    unsigned int game_id; // ID della partita
     char *game_name; // Nome della partita (max 30 caratteri + terminatore), NULL se non impostato
+    unsigned int game_id; // ID della partita
+
     PlayerState *players; // Array di giocatori nella partita
-    int players_count; // Numero attuale di giocatori nella partita
-    int players_capacity; // Capacità attuale dell'array dei giocatori
+    unsigned int players_count; // Numero attuale di giocatori nella partita
+    unsigned int players_capacity; // Capacità attuale dell'array dei giocatori
+
+    unsigned int player_turn; // Index del giocatore  in `players` il cui turno è attivo
 } GameState;
 
 GameState *create_game_state(unsigned int game_id, const char *game_name);
-int add_player_to_game(GameState *game, int player_id, char *username);
-int remove_player_from_game(GameState *game, unsigned int player_id);
+int add_player_to_game_state(GameState *game, int player_id, char *username);
+int remove_player_from_game_state(GameState *game, unsigned int player_id);
+PlayerState *get_player_state(GameState *game, unsigned int player_id);
 
 int init_board(GameBoard *board);
 int place_ship(GameBoard *board, int x, int y);

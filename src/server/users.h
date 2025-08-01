@@ -35,3 +35,4 @@ void remove_game(unsigned int game_id);
 void free_game(Game *game);
 int add_player_to_game(unsigned int game_id, unsigned int player_id);
 int remove_player_from_game(unsigned int game_id, unsigned int player_id);
+int get_game_owner_id(unsigned int game_id);
