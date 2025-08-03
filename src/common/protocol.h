@@ -7,6 +7,8 @@ typedef enum {
     MSG_LOGIN,
     MSG_CREATE_GAME,
     MSG_JOIN_GAME,
+    MSG_LEAVE_GAME,
+    MSG_READY_TO_PLAY,
     MSG_START_GAME,
     MSG_GAME_ACTION
 } PlayerMsgType;
@@ -52,7 +54,17 @@ typedef struct _PayloadNode {
     struct _PayloadNode *next;
 } PayloadNode;
 
-// TODO introdurre una gestione del payload come array di dictionary
+typedef struct _PayloadList {
+    PayloadNode *head;
+    struct _PayloadList *next;
+} PayloadList;
+
+typedef struct {
+    PayloadList *head;
+    PayloadList *tail;
+    int size;
+} Payload;
+
 
 Msg *recvMsg(int socket_fd);
 int sendMsg(int socket_fd, Msg *msg);
@@ -60,14 +72,20 @@ int sendMsg(int socket_fd, Msg *msg);
 Msg *createMsg(uint16_t header_type, uint32_t payload_size, char *payload);
 void freeMsg(Msg *msg);
 
-PayloadNode *parsePayload(char *buffer);
-char *serializePayload(PayloadNode *head);
+Payload *createEmptyPayload();
+int addPayloadKeyValuePair(Payload *payload, const char *key, const char *value);
+int addPayloadList(Payload *payload);
 
-PayloadNode *updatePayload(PayloadNode *head, char *key, char *value);
-char *getPayloadValue(PayloadNode *head, char *key);
-void freePayloadNodes(PayloadNode *head);
+char *getPayloadValue(Payload *payload, int index, const char *key);
+int getPayloadIntValue(Payload *payload, int index, const char *key, int *value_out);
+int getPayloadListSize(Payload *payload);
 
-int safeSendMsg(int client_fd, uint16_t msg_type, PayloadNode *payload);
-int safeRecvMsg(int client_fd, uint16_t *msg_type_out, PayloadNode **payload_out);
+Payload *parsePayload(char *buffer);
+char *serializePayload(Payload *payload);
+
+void freePayload(Payload *payload);
+
+int safeSendMsg(int client_fd, uint16_t msg_type, Payload *payload);
+int safeRecvMsg(int client_fd, uint16_t *msg_type_out, Payload **payload_out);
 
 #endif // PROTOCOL_H

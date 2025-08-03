@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include "common/protocol.h"
+#include "utils/userInput.h"
 
 
 /**
@@ -26,7 +27,6 @@ int sendByteStream(int socket_fd, char *buffer, size_t num_bytes){
         if(result < 0){
             if(errno == EINTR) continue;
             // Errore o disconnessione
-            close(socket_fd);
             return -1;
         }
         bytes_sent += result;
@@ -51,7 +51,6 @@ int recvByteStream(int socket_fd, char *buffer, size_t num_bytes){
         if(result <= 0){
             if(errno == EINTR) continue;
             // Errore o disconnessione
-            close(socket_fd);
             return -1;
         }
 
@@ -63,7 +62,7 @@ int recvByteStream(int socket_fd, char *buffer, size_t num_bytes){
 /**
  * Legge un messaggio da socket nella sua interezza.
  * @param sock_fd File descriptor della socket da cui leggere.
- * @return Puntatore a struttura Msg contenente header e payload ricevuti.
+ * @return Puntatore a struttura Msg contenente header e payload ricevuti, o NULL in caso di errore.
  * 
  */
 Msg *recvMsg(int socket_fd){
@@ -77,7 +76,9 @@ Msg *recvMsg(int socket_fd){
     uint32_t payload_size = header.payloadSize;
 
     char *payload_buffer = (char *)malloc(payload_size + 1);
-    if(payload_buffer == NULL) exit(EXIT_FAILURE);
+    if(payload_buffer == NULL) {
+        return NULL; // Errore di allocazione
+    }
     if(recvByteStream(socket_fd, payload_buffer, payload_size) == -1){
         free(payload_buffer);
         return NULL;
@@ -86,7 +87,9 @@ Msg *recvMsg(int socket_fd){
 
     // a questo punto dispongo del messaggio completo
     Msg *msg = (Msg *)malloc(sizeof(Msg));
-    if(msg == NULL) exit(EXIT_FAILURE);
+    if(msg == NULL) {
+        return NULL; // Errore di allocazione
+    }
 
     msg->header = header;
     msg->payload = payload_buffer;
@@ -124,11 +127,13 @@ int sendMsg(int socket_fd, Msg *msg){
  * @param header_type Tipo del messaggio (campo msgType dell'header).
  * @param payload_size Dimensione del payload in byte.
  * @param payload Puntatore alla stringa del payload da copiare.
- * @return Puntatore alla struttura Msg allocata dinamicamente.
+ * @return Puntatore alla struttura Msg allocata dinamicamente, o NULL in caso di errore.
  */
 Msg *createMsg(uint16_t header_type, uint32_t payload_size, char *payload){
     Msg *msg = (Msg *)malloc(sizeof(Msg));
-    if(msg == NULL) exit(EXIT_FAILURE);
+    if(msg == NULL) {
+        return NULL; // Errore di allocazione
+    }
 
     msg->header.msgType = header_type;
     msg->header.payloadSize = payload_size;
@@ -147,28 +152,30 @@ void freeMsg(Msg *msg){
 }
 
 /**
- *  Restituisce una nuova stringa in cui tutti i caratteri speciali ('|', ':', '\\')
+ *  Restituisce una nuova stringa in cui tutti i caratteri speciali ('|', ':', '[', ']', '\\')
  *  presenti nella stringa di input vengono preceduti da un carattere di escape '\\'.
  *  Utile per serializzare stringhe che devono essere trasmesse in protocolli testuali
  *  dove questi caratteri hanno un significato particolare.
  *  La memoria restituita va liberata dal chiamante con free().
  *
  * @param src Stringa di input da processare.
- * @return Puntatore a nuova stringa allocata dinamicamente.
+ * @return Puntatore a nuova stringa allocata dinamicamente, o NULL in caso di errore.
  */
-char *escapeString(char *src){
+char *escapeString(const char *src){
     int len = strlen(src);
     int count = 0;
     for(int i = 0; i < len; i++){
-        if(src[i] == '|' || src[i] == ':' || src[i] == '\\') count++;
+        if(src[i] == '|' || src[i] == ':' || src[i] == '[' || src[i] == ']' || src[i] == ',' || src[i] == '\\') count++;
     }
 
     char *dst = (char *)malloc(len + count + 1);
-    if(dst == NULL) exit(EXIT_FAILURE);
+    if(dst == NULL) {
+        return NULL; // Errore di allocazione
+    }
 
     int i = 0, j = 0;
     while(i < len){
-        if(src[i] == '|' || src[i] == ':' || src[i] == '\\'){
+        if(src[i] == '|' || src[i] == ':' || src[i] == '[' || src[i] == ']' || src[i] == ',' || src[i] == '\\'){
             dst[j++] = '\\'; // aggiungi il backslash
             dst[j++] = src[i++] ^ 0x7f;
         } else {
@@ -187,12 +194,14 @@ char *escapeString(char *src){
  *  La memoria restituita va liberata dal chiamante con free().
  *
  * @param src Stringa di input da processare.
- * @return Puntatore a nuova stringa allocata dinamicamente.
+ * @return Puntatore a nuova stringa allocata dinamicamente, o NULL in caso di errore.
  */
-char *unescapeString(char *src){
+char *unescapeString(const char *src){
     int len = strlen(src);
     char *dst = (char *)malloc(len+1);
-    if(dst == NULL) exit(EXIT_FAILURE);
+    if(dst == NULL) {
+        return NULL; // Errore di allocazione
+    }
 
     int i = 0, j = 0;
     while(i < len){
@@ -209,204 +218,411 @@ char *unescapeString(char *src){
 }
 
 /**
- * Parsa una stringa di input formattata come "key1:value1|key2:value2|..."
- * in una lista concatenata di PayloadNode, dove ogni nodo contiene una coppia chiave-valore.
- * La memoria allocata per la lista va liberata con freePayloadNodes.
- * @param buffer Stringa di input da processare.
- * @return Puntatore alla testa della lista di PayloadNode.
+ * Crea un nuovo Payload vuoto.
+ * @return Un puntatore a un nuovo Payload, o NULL in caso di errore.
  */
-PayloadNode *parsePayload(char *buffer){
-    char *buf_copy = strdup(buffer);
-    if (!buf_copy) exit(EXIT_FAILURE);
-
-    PayloadNode *head = (PayloadNode *)calloc(1, sizeof(PayloadNode));
-    if(head == NULL) exit(EXIT_FAILURE);
-    PayloadNode *curr = head;
-
-    char *pair = strtok(buf_copy, "|");
-    while(pair){
-        char *sep = strchr(pair, ':');
-        if(!sep){
-            pair = strtok(NULL, "|");
-            continue; // formato errato, salta
-        }
-        *sep = '\0';
-
-        char *key_escaped = pair;
-        char *value_escaped = sep + 1;
-
-        char *key = unescapeString(key_escaped);
-        char *value = unescapeString(value_escaped);
-
-        PayloadNode *new = (PayloadNode *)malloc(sizeof(PayloadNode));
-        if(new == NULL) exit(EXIT_FAILURE);
-        new->key = key;
-        new->value = value;
-        new->next = NULL;
-
-        curr->next = new;
-        curr = new;
-
-        pair = strtok(NULL, "|");
-    }
-
-    free(buf_copy);
-    return head;
+Payload *createEmptyPayload() {
+    Payload *payload = calloc(1, sizeof(Payload));
+    return payload;
 }
 
 /**
- * Serializza una lista di PayloadNode in una stringa formattata come "key1:value1|key2:value2|...".
- * La stringa restituita va liberata dal chiamante con free().
- * @param head Puntatore alla testa della lista di PayloadNode.
- * @return Puntatore a stringa allocata dinamicamente con la serializzazione.
+ * Aggiunge una coppia chiave-valore all'ultima lista del Payload.
+ * Se il Payload non ha liste, ne crea una nuova.
+ * @param payload Il Payload da modificare.
+ * @param key La chiave da aggiungere.
+ * @param value Il valore da aggiungere.
+ * @return 0 in caso di successo, -1 in caso di errore.
  */
-char *serializePayload(PayloadNode *head){
-    if(head == NULL) return strdup(""); // caso base, lista vuota
+int addPayloadKeyValuePair(Payload *payload, const char *key, const char *value) {
+    if (!payload || !key || !value) return -1;
 
-    size_t total_size = 0;
-    PayloadNode *curr = head->next; // salta il nodo sentinella
-    while(curr){
-        total_size += strlen(curr->key) + strlen(curr->value) + 2; // +2 per ':' e '|'
-        curr = curr->next;
+    // Se il payload è vuoto, aggiungi la prima lista
+    if (payload->tail == NULL) {
+        if (addPayloadList(payload) != 0) return -1;
     }
 
-    char *buffer = (char *)malloc(total_size + 1);
-    if(buffer == NULL) exit(EXIT_FAILURE);
+    // Crea il nuovo nodo
+    PayloadNode *newNode = malloc(sizeof(PayloadNode));
+    if (!newNode) return -1;
+    newNode->key = strdup(key);
+    newNode->value = strdup(value);
+    newNode->next = NULL;
 
-    char *ptr = buffer;
-    curr = head->next; // salta il nodo sentinella
-    while(curr){
-        ptr += sprintf(ptr, "%s:%s|", escapeString(curr->key), escapeString(curr->value));
-        curr = curr->next;
-    }
-
-    // rimuovo l'ultimo '|'
-    if(ptr > buffer) ptr--; 
-    *ptr = '\0';
-
-    return buffer;
-}
-
-/**
- * Aggiorna il valore associato a una chiave nella lista di PayloadNode.
- * Se la chiave non esiste, aggiunge un nuovo nodo in fondo alla lista.
- * Se il nodo esiste, libera il vecchio valore e lo sostituisce con il nuovo.
- * Se la lista è vuota, crea un nodo head.
- * @param head Puntatore al nodo sentinella della lista di PayloadNode.
- * @param key Chiave da aggiornare o inserire.
- * @param value Nuovo valore da associare alla chiave.
- * @return Puntatore alla testa della lista aggiornata.
- */
-PayloadNode *updatePayload(PayloadNode *head, char *key, char *value){
-    if(key == NULL || value == NULL) {
-        fprintf(stderr, "updatePayload: key or value is NULL\n");
-        exit(EXIT_FAILURE);
-    }
-    if(head == NULL) {
-        head = (PayloadNode *)calloc(1, sizeof(PayloadNode));
-    }
-    PayloadNode *curr = head;
-    while(curr->next){
-        curr = curr->next;
-
-        if(strcmp(curr->key, key) == 0){
-            free(curr->value); // libera il vecchio valore
-            curr->value = strdup(value); // assegna il nuovo valore
-            return head;
-        }
-    }
-
-    // la chiave non esiste, la aggiungo alla fine
-    PayloadNode *new = (PayloadNode *)malloc(sizeof(PayloadNode));
-    if(new == NULL) exit(EXIT_FAILURE);
-
-    new->key = strdup(key);
-    new->value = strdup(value);
-    new->next = NULL;
-
-    curr->next = new; // aggiungo il nuovo nodo alla fine della lista
-    return head;
-}
-
-/**
- * Restituisce una copia allocata dinamicamente del valore associato a una chiave nella lista di PayloadNode.
- * La stringa restituita va liberata dal chiamante con free().
- * @param head Puntatore alla testa della lista di PayloadNode.
- * @param key Chiave da cercare.
- * @return Puntatore a una nuova stringa allocata dinamicamente con il valore associato, oppure NULL se la chiave non esiste.
- */
-char *getPayloadValue(PayloadNode *head, char *key){
-    PayloadNode *curr = head;
-    while(curr->next){
-        curr = curr->next;
-
-        if(strcmp(curr->key, key) == 0){
-            return strdup(curr->value); // trovato, restituisco il valore
-        }
-    }
-
-    return NULL; // chiave non trovata
-}
-
-/**
- * Libera la memoria allocata dinamicamente per la lista concatenata di PayloadNode.
- * Ogni nodo viene liberato, inclusi i campi key e value.
- * @param head Puntatore alla testa della lista di PayloadNode.
- */
-void freePayloadNodes(PayloadNode *head){
-    PayloadNode *curr = head;
-    while(curr){
-        PayloadNode *next = curr->next;
-        free(curr->key);
-        free(curr->value);
-        free(curr);
-        curr = next;
-    }
-}
-
-
-
-/**
- * Invia un messaggio a un client in modo sicuro, gestendo errori e cleanup automatico.
- * Se l'invio fallisce,  libera le risorse.
- * @param client_fd File descriptor della socket del client.
- * @param msg_type Tipo del messaggio da inviare.
- * @param payload Lista di PayloadNode da serializzare e inviare come payload.
- * @return 0 se l'invio è andato a buon fine, -1 in caso di errore (con cleanup già effettuato).
- */
-int safeSendMsg(int client_fd, uint16_t msg_type, PayloadNode *payload){
-    char *serialized = serializePayload(payload);
-    Msg *msg = createMsg(msg_type, strlen(serialized) + 1, serialized);
-    if (sendMsg(client_fd, msg) == -1) {
-        freeMsg(msg);
-        free(serialized);
-        freePayloadNodes(payload);
+    if (!newNode->key || !newNode->value) {
+        free(newNode->key);
+        free(newNode->value);
+        free(newNode);
         return -1;
     }
 
-    freeMsg(msg);
-    free(serialized);
-    freePayloadNodes(payload);
+    // Aggiungi il nodo alla fine della lista corrente (nell'ultima PayloadList)
+    PayloadNode *current = payload->tail->head;
+    if (current == NULL) {
+        payload->tail->head = newNode;
+    } else {
+        while (current->next != NULL) {
+            current = current->next;
+        }
+        current->next = newNode;
+    }
+    
     return 0;
 }
 
 
 /**
+ * Aggiunge una nuova lista vuota alla fine del Payload.
+ * @param payload Il Payload a cui aggiungere la lista.
+ * @return 0 in caso di successo, -1 in caso di errore.
+ */
+int addPayloadList(Payload *payload) {
+    if (!payload) return -1;
+
+    PayloadList *newList = calloc(1, sizeof(PayloadList));
+    if (!newList) return -1;
+
+    if (payload->tail == NULL) {
+        payload->head = payload->tail = newList;
+    } else {
+        payload->tail->next = newList;
+        payload->tail = newList;
+    }
+    payload->size++;
+    return 0;
+}
+
+ /**
+ * Restituisce il valore associato a una chiave in una specifica lista del Payload.
+ * @param payload Il Payload in cui cercare.
+ * @param index L'indice della lista (0-based) in cui cercare.
+ * @param key La chiave da trovare.
+ * @return Una copia del valore se trovato, altrimenti NULL. Il chiamante deve liberare la memoria.
+ */
+char *getPayloadValue(Payload *payload, int index, const char *key) {
+    if (!payload || !payload->head || index < 0 || index >= payload->size) {
+        return NULL;
+    }
+
+    PayloadList *current_list = payload->head;
+    for (int i = 0; i < index; i++) {
+        current_list = current_list->next;
+    }
+
+    PayloadNode *current_node = current_list->head;
+    while (current_node) {
+        if (strcmp(current_node->key, key) == 0) {
+            return strdup(current_node->value);
+        }
+        current_node = current_node->next;
+    }
+
+    return NULL; // Chiave non trovata in quella lista
+}
+
+int getPayloadIntValue(Payload *payload, int index, const char *key, int *value_out) {
+    if (!payload || !key || !value_out) return -1;
+
+    char *value_str = getPayloadValue(payload, index, key);
+    if (!value_str) return -1;
+
+    int ret = getIntFromString(value_str, value_out);
+    free(value_str);
+    return ret;
+}
+
+/**
+ * Restituisce il numero di liste nel Payload.
+ */
+int getPayloadListSize(Payload *payload) {
+    if (!payload) return 0;
+    return payload->size;
+}
+
+
+/**
+ * Parsa una stringa "key1:value1|key2:value2" in una lista di PayloadNode.
+ * Helper interno per parsePayload.
+ * @param list_str La stringa che rappresenta una singola lista di chiavi e valori.
+ * @param target_list Puntatore dove verrà memorizzata la testa della lista di nodi creata.
+ * @return 0 in caso di successo, -1 in caso di errore.
+ */
+static int parsePayloadListFromString(char *list_str, PayloadList *target_list) {
+    char *pair_saveptr;
+    char *pair = strtok_r(list_str, "|", &pair_saveptr);
+    PayloadNode *current_node = NULL;
+
+    while (pair) {
+        char *sep = strchr(pair, ':');
+        if (!sep) {
+            pair = strtok_r(NULL, "|", &pair_saveptr);
+            continue; // Formato non valido, salta
+        }
+        *sep = '\0';
+
+        char *key_unescaped = unescapeString(pair);
+        char *value_unescaped = unescapeString(sep + 1);
+        if (!key_unescaped || !value_unescaped) {
+             free(key_unescaped);
+             free(value_unescaped);
+             return -1; // Errore di unescape
+        }
+
+        PayloadNode *newNode = malloc(sizeof(PayloadNode));
+        if (!newNode) {
+            free(key_unescaped);
+            free(value_unescaped);
+            return -1;
+        }
+        newNode->key = key_unescaped;
+        newNode->value = value_unescaped;
+        newNode->next = NULL;
+
+        // Aggiungi il nodo alla lista
+        if (target_list->head == NULL) {
+            target_list->head = newNode;
+            current_node = newNode;
+        } else {
+            current_node->next = newNode;
+            current_node = newNode;
+        }
+
+        pair = strtok_r(NULL, "|", &pair_saveptr);
+    }
+    return 0;
+}
+
+/**
+ * Parsa un buffer serializzato in una struttura Payload.
+ * Formato atteso: "[k1:v1|k2:v2],[k3:v3|k4:v4]"
+ * @param buffer La stringa serializzata.
+ * @return Un puntatore a un nuovo Payload, o NULL in caso di errore.
+ */
+Payload *parsePayload(char *buffer) {
+    if (!buffer) return NULL;
+
+    char *buf_copy = strdup(buffer);
+    if (!buf_copy) return NULL;
+
+    Payload *payload = createEmptyPayload();
+    if (!payload) {
+        free(buf_copy);
+        return NULL;
+    }
+
+    // strtok non gestisce bene i token vuoti, quindi usiamo un approccio manuale
+    char *cursor = buf_copy;
+    while (*cursor) {
+        // Salta le virgole iniziali
+        if (*cursor == ',') cursor++;
+
+        if (*cursor == '\0') break;
+
+        // Trova l'inizio e la fine di una lista `[...]`
+        char* start = strchr(cursor, '[');
+        if (!start) break;
+        char* end = strchr(start, ']');
+        if (!end) break; // Malformato
+
+        *end = '\0'; // Termina la stringa della lista
+        char *list_content = start + 1;
+
+        // Aggiungi una nuova PayloadList al payload
+        if (addPayloadList(payload) != 0) {
+            freePayload(payload);
+            free(buf_copy);
+            return NULL;
+        }
+
+        // Parsa il contenuto della lista e popola l'ultima PayloadList aggiunta
+        if (parsePayloadListFromString(list_content, payload->tail) != 0) {
+            freePayload(payload);
+            free(buf_copy);
+            return NULL;
+        }
+        
+        cursor = end + 1;
+    }
+
+    free(buf_copy);
+    return payload;
+}
+
+
+/**
+ * Serializza una struttura Payload in una stringa.
+ * Formato di output: "[k1:v1|k2:v2],[k3:v3]"
+ * @param payload La struttura Payload da serializzare.
+ * @return Una stringa allocata dinamicamente, o NULL in caso di errore.
+ */
+char *serializePayload(Payload *payload) {
+    if (!payload || !payload->head) {
+        return strdup(""); // Payload vuoto o non inizializzato
+    }
+
+    size_t total_size = 0;
+    PayloadList *current_list = payload->head;
+
+    // Calcola la dimensione totale necessaria, effettuando l'escape
+    while (current_list) {
+        total_size += 3; // Per '[', ']' e la virgola di separazione
+        PayloadNode *current_node = current_list->head;
+
+        while (current_node) {
+            char *key_esc = escapeString(current_node->key);
+            char *val_esc = escapeString(current_node->value);
+
+            if (!key_esc || !val_esc) { // Gestione errore
+                 free(key_esc);
+                 free(val_esc);
+                 return NULL;
+            }
+
+            total_size += strlen(key_esc) + strlen(val_esc) + 2; // +2 per ':' e '|'
+
+            free(key_esc);
+            free(val_esc);
+            current_node = current_node->next;
+        }
+        current_list = current_list->next;
+    }
+
+    if (total_size == 0) return strdup("");
+
+    // Alloca il buffer e costruisci la stringa
+    char *buffer = malloc(total_size + 1);
+    if (!buffer) return NULL;
+    buffer[0] = '\0';
+
+    current_list = payload->head;
+    while (current_list) {
+        strcat(buffer, "[");
+        PayloadNode *current_node = current_list->head;
+
+        while (current_node) {
+            char *key_esc = escapeString(current_node->key);
+            char *val_esc = escapeString(current_node->value);
+
+            if (!key_esc || !val_esc) {
+                 free(key_esc);
+                 free(val_esc);
+                 free(buffer);
+                 return NULL;
+            }
+
+            strcat(buffer, key_esc);
+            strcat(buffer, ":");
+            strcat(buffer, val_esc);
+
+            free(key_esc);
+            free(val_esc);
+
+            if (current_node->next) {
+                strcat(buffer, "|");
+            }
+            current_node = current_node->next;
+        }
+
+        strcat(buffer, "]");
+        if (current_list->next) {
+            strcat(buffer, ",");
+        }
+
+        current_list = current_list->next;
+    }
+
+    return buffer;
+}
+
+
+/**
+ * Libera la memoria per una lista di PayloadNode.
+ */
+static void freePayloadNode(PayloadNode *head) {
+    PayloadNode *current = head;
+    while (current) {
+        PayloadNode *next = current->next;
+        free(current->key);
+        free(current->value);
+        free(current);
+        current = next;
+    }
+}
+
+/**
+ * Libera la memoria per una lista di PayloadList.
+ */
+static void freePayloadList(PayloadList *head) {
+    PayloadList *current = head;
+    while (current) {
+        PayloadList *next = current->next;
+        freePayloadNode(current->head);
+        free(current);
+        current = next;
+    }
+}
+
+/**
+ * Libera la memoria per un'intera struttura Payload.
+ */
+void freePayload(Payload *payload) {
+    if (!payload) return;
+    freePayloadList(payload->head);
+    free(payload);
+}
+
+
+/**
+ * Invia un messaggio a un client in modo sicuro, gestendo errori e cleanup automatico.
+ * Se l'invio fallisce,  libera le risorse.
+ * @return 0 in caso di successo, -1 in caso di errore.
+ */
+int safeSendMsg(int client_fd, uint16_t msg_type, Payload *payload) {
+    char *serialized_payload = serializePayload(payload);
+    if (!serialized_payload) {
+        freePayload(payload);
+        return -1;
+    }
+
+    Msg *msg = createMsg(msg_type, strlen(serialized_payload), serialized_payload);
+    if (!msg) {
+        free(serialized_payload);
+        freePayload(payload);
+        return -1;
+    }
+    
+    int result = sendMsg(client_fd, msg);
+
+    // Cleanup
+    freeMsg(msg);
+    freePayload(payload);
+    
+    return result;
+}
+
+/**
  * Riceve un messaggio da un client in modo sicuro, gestendo errori e cleanup automatico.
  * In caso di errore o disconnessione, libera le risorse.
- * @param client_fd File descriptor della socket del client.
- * @param msg_type_out Puntatore dove verrà scritto il tipo del messaggio ricevuto.
- * @param payload_out Puntatore dove verrà scritto il payload deserializzato (lista di PayloadNode).
- * @return 0 se la ricezione è andata a buon fine, -1 in caso di errore (con cleanup già effettuato).
+ * @param client_fd File descriptor.
+ * @param msg_type_out Puntatore per il tipo di messaggio ricevuto.
+ * @param payload_out Puntatore per il Payload deserializzato.
+ * @return 0 in caso di successo, -1 in caso di errore o disconnessione.
  */
-int safeRecvMsg(int client_fd, uint16_t *msg_type_out, PayloadNode **payload_out) {
+int safeRecvMsg(int client_fd, uint16_t *msg_type_out, Payload **payload_out) {
     Msg *received_msg = recvMsg(client_fd);
     if (received_msg == NULL) {
-        return -1;
+        return -1; // Errore o disconnessione
     }
 
     *msg_type_out = received_msg->header.msgType;
     *payload_out = parsePayload(received_msg->payload);
+
+    if (*payload_out == NULL && received_msg->header.payloadSize > 0) {
+        // Errore di parsing
+        freeMsg(received_msg);
+        return -1;
+    }
+
     freeMsg(received_msg);
     return 0;
 }
