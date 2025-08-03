@@ -55,7 +55,7 @@ int main(int argc, char *argv[]){
 
     int optval = 1;
     if (setsockopt(list_s, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) < 0) {
-        LOG_DEBUG_ERROR("Errore in setsockopt SO_REUSEADDR");
+        LOG_ERROR("Errore in setsockopt SO_REUSEADDR");
         exit(EXIT_FAILURE);
     }
 
