@@ -132,63 +132,90 @@ PlayerState *get_player_state(GameState *game, unsigned int player_id) {
     return NULL; // Giocatore non trovato
 }
 
+/**
+ * Inizializza la griglia di gioco di un giocatore.
+ * @param board Puntatore alla struttura GameBoard da inizializzare.
+ * @return 0 se l'inizializzazione è riuscita, -1 in caso di errore.
+ */
 int init_board(GameBoard *board) {
     if (board == NULL) {
-        fprintf(stderr, "init_board: board is NULL\n");
         return -1;
     }
 
     memset(board->grid, '.', sizeof(board->grid)); // Inizializza la griglia a vuoto
-    board->ships_left = NUM_SHIPS; // Imposta il numero di navi rimaste
+    board->ships_left = 0; // Imposta il numero di navi rimaste
     return 0;
 }
 
-int place_ship(GameBoard *board, int x, int y) {
+ /**
+ * Imposta il valore di una cella nella griglia di gioco.
+ * @param board Puntatore alla struttura GameBoard su cui impostare la cella.
+ * @param x Coordinata X della cella da impostare.
+ * @param y Coordinata Y della cella da impostare.
+ * @param value Valore da impostare nella cella.
+ * @return 0 se l'operazione è riuscita, -1 in caso di errore.
+ */
+int set_cell(GameBoard *board, int x, int y, char value) {
     if (board == NULL || x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE) {
-        fprintf(stderr, "place_ship: invalid board or coordinates\n");
         return -1;
     }
 
-    if (board->grid[x][y] == 'O') {
-        fprintf(stderr, "place_ship: ship already placed at (%d, %d)\n", x, y);
-        return -1; // Nave già presente
+    board->grid[x][y] = value; // Imposta il valore della cella
+    return 0;
+}
+
+int is_ship_present(GameBoard *board, int x, int y) {
+    if (board == NULL || x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE) {
+        return -1;
+    }
+    return (board->grid[x][y] >= 'A' && board->grid[x][y] <= 'E'); // Controlla se c'è una nave nella cella
+}
+
+/**
+ * Posiziona una nave sulla griglia di gioco.
+ * @param board Puntatore alla struttura GameBoard su cui posizionare la nave.
+ * @param x Coordinata X della cella in cui posizionare la nave.
+ * @param y Coordinata Y della cella in cui posizionare la nave.
+ * @return 0 se la nave è stata posizionata con successo, -1 in caso di errore.
+ */
+int place_ship(GameBoard *board, int x, int y, int dim, int vertical) {
+    if (board == NULL || x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE || dim <= 0) {
+        return -1;
+    }
+    if (board->ships_left >= NUM_SHIPS) {
+        return -1; // Non è possibile posizionare più navi
     }
 
-    // Controlla celle adiacenti (inclusi diagonali)
-    for (int dx = -1; dx <= 1; dx++) {
-        for (int dy = -1; dy <= 1; dy++) {
-            int nx = x + dx;
-            int ny = y + dy;
-            if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
-                if (board->grid[nx][ny] == 'O') {
-                    fprintf(stderr, "place_ship: adjacent ship at (%d, %d)\n", nx, ny);
-                    return -1;
-                }
+    if(!vertical) {
+        if (x + dim > GRID_SIZE) {
+            return -1; // La nave non può essere posizionata orizzontalmente
+        }
+        for (int i = 0; i < dim; i++) {
+            if (board->grid[x + i][y] != '.') {
+                return -1; // Non è possibile posizionare una nave in una cella già occupata
             }
+        }
+        for (int i = 0; i < dim; i++) {
+            board->grid[x + i][y] = 'A' + dim - 1; // Posiziona la nave
+        }
+    } else {
+        if (y + dim > GRID_SIZE) {
+            return -1; // La nave non può essere posizionata verticalmente
+        }
+        for (int i = 0; i < dim; i++) {
+            if (board->grid[x][y + i] != '.') {
+                return -1; // Non è possibile posizionare una nave in una cella già occupata
+            }
+        }
+        for (int i = 0; i < dim; i++) {
+            board->grid[x][y + i] = 'A' + dim - 1; // Posiziona la nave
         }
     }
 
-    board->grid[x][y] = 'O'; // Posiziona la nave
+    if (board->grid[x][y] != '.') {
+        return -1; // Non è possibile posizionare una nave in una cella già occupata
+    }
+
+    board->ships_left++;
     return 0;
-}
-
-int attack(GameBoard *board, int x, int y) {
-    if (board == NULL || x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE) {
-        fprintf(stderr, "attack: invalid board or coordinates\n");
-        return -1;
-    }
-
-    if (board->grid[x][y] == 'X' || board->grid[x][y] == '*') {
-        fprintf(stderr, "attack: already attacked at (%d, %d)\n", x, y);
-        return -1; // Già attaccato
-    }
-
-    if (board->grid[x][y] == 'O') {
-        board->grid[x][y] = 'X'; // Colpito
-        board->ships_left--;
-        return 1; // Colpito
-    } else {
-        board->grid[x][y] = '*'; // Mancato
-        return 0; // Mancato
-    }
 }

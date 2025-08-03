@@ -1,3 +1,5 @@
+#ifndef GAME_H
+#define GAME_H
 
 #define GRID_SIZE 10
 #define NUM_SHIPS 5
@@ -30,5 +32,8 @@ int remove_player_from_game_state(GameState *game, unsigned int player_id);
 PlayerState *get_player_state(GameState *game, unsigned int player_id);
 
 int init_board(GameBoard *board);
-int place_ship(GameBoard *board, int x, int y);
-int attack(GameBoard *board, int x, int y);
+int set_cell(GameBoard *board, int x, int y, char value);
+int is_ship_present(GameBoard *board, int x, int y);
+int place_ship(GameBoard *board, int x, int y, int dim, int vertical);
+
+#endif // GAME_H
