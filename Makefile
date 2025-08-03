@@ -3,8 +3,8 @@ CFLAGS = -Wall -Wextra -g -Isrc -DDEBUG
 LDFLAGS = -lpthread
 SRC_DIR = src
 
-COMMON_SRC = $(SRC_DIR)/common/protocol.c $(SRC_DIR)/common/game.c $(SRC_DIR)/utils/list.c $(SRC_DIR)/utils/cmdLineParser.c
-CLIENT_SRC = $(SRC_DIR)/client/client.c $(COMMON_SRC)
+COMMON_SRC = $(SRC_DIR)/common/protocol.c $(SRC_DIR)/common/game.c $(SRC_DIR)/utils/list.c $(SRC_DIR)/utils/cmdLineParser.c $(SRC_DIR)/utils/userInput.c
+CLIENT_SRC = $(SRC_DIR)/client/client.c $(COMMON_SRC) $(SRC_DIR)/client/clientGameManager.c
 SERVER_SRC = $(SRC_DIR)/server/server.c $(COMMON_SRC) $(SRC_DIR)/server/users.c $(SRC_DIR)/server/gameManager.c $(SRC_DIR)/server/lobbyManager.c
 
 all: client server
