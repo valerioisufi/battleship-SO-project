@@ -1,3 +1,6 @@
+#ifndef LIST_H
+#define LIST_H
+
 #include <unistd.h>
 #include <pthread.h>
 
@@ -28,3 +31,5 @@ void free_list_manager(ListManager *manager);
 ListItem *get_node(size_t index, ListManager *manager);
 ListItem *add_node(ListManager *manager, void *ptr);
 void release_node(ListManager *manager, size_t index);
+
+#endif // LIST_H
