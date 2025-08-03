@@ -59,9 +59,11 @@ char *readAlfanumericString(int maxLength) {
 
 read:
     if (fgets(input, maxLength + 2, stdin) == NULL) {
+        LOG_ERROR("Errore durante la lettura dell'input");
         free(input);
         return NULL; // Errore di lettura o fine del file
     }
+    eof_handler();
 
     // Cerca il carattere di newline. Se non c'è, l'input era troppo lungo
     char *newline = strchr(input, '\n');
@@ -84,17 +86,18 @@ read:
               (input[i] >= '0' && input[i] <= '9') ||
               input[i] == ' ' || input[i] == '-' || input[i] == '_' || input[i] == '.')) {
             LOG_ERROR("Carattere non permesso: '%c' in '%s'", input[i], input);
+            printf("Sono ammessi solo lettere, numeri, spazi, '.', '-' e '_'.\nReinserisci: ");
 
-            printf("Reinserisci: ");
             goto read;
         }
     }
 
-    char *result = strdup(input);
-    if (!result) {
-        LOG_ERROR("Errore di allocazione memoria con strdup");
-    }
+    return input;
+}
 
-    free(input);
-    return result; // Potrebbe essere NULL se strdup fallisce
+void eof_handler() {
+    if(feof(stdin)) {
+        printf("\nChiusura programma (EOF ricevuto).\n");
+        exit(0);
+    }
 }
