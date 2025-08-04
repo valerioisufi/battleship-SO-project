@@ -22,11 +22,16 @@
 #define LOG_ERROR(fmt, ...) LOG_BASE("ERROR", ANSI_COLOR_RED, stderr, "%s:%d " fmt, __FILE__, __LINE__, ##__VA_ARGS__)
 #define LOG_MSG_ERROR(fmt, ...) LOG_BASE("MSG ERROR", ANSI_COLOR_MAGENTA, stderr, "%s:%d " fmt, __FILE__, __LINE__, ##__VA_ARGS__)
 
-// Macro di livello superiore con tag (deve essere definito LOG_TAG)
+// Macro di livello superiore con tag
 #define LOG_INFO_TAG(fmt, ...) LOG_BASE_TAG("INFO", ANSI_COLOR_GREEN, stdout, LOG_TAG, fmt, ##__VA_ARGS__)
 #define LOG_WARNING_TAG(fmt, ...) LOG_BASE_TAG("WARNING", ANSI_COLOR_YELLOW, stderr, LOG_TAG, fmt, ##__VA_ARGS__)
 #define LOG_ERROR_TAG(fmt, ...) LOG_BASE_TAG("ERROR", ANSI_COLOR_RED, stderr, LOG_TAG, "%s:%d " fmt, __FILE__, __LINE__, ##__VA_ARGS__)
 #define LOG_MSG_ERROR_TAG(fmt, ...) LOG_BASE_TAG("MSG ERROR", ANSI_COLOR_MAGENTA, stderr, LOG_TAG, "%s:%d " fmt, __FILE__, __LINE__, ##__VA_ARGS__)
+
+#define LOG_INFO_FILE(stream, fmt, ...) LOG_BASE("INFO", ANSI_COLOR_GREEN, stream, fmt, ##__VA_ARGS__)
+#define LOG_WARNING_FILE(stream, fmt, ...) LOG_BASE("WARNING", ANSI_COLOR_YELLOW, stream, fmt, ##__VA_ARGS__)
+#define LOG_ERROR_FILE(stream, fmt, ...) LOG_BASE("ERROR", ANSI_COLOR_RED, stream, "%s:%d " fmt, __FILE__, __LINE__, ##__VA_ARGS__)
+#define LOG_MSG_ERROR_FILE(stream, fmt, ...) LOG_BASE("MSG ERROR", ANSI_COLOR_MAGENTA, stream, "%s:%d " fmt, __FILE__, __LINE__, ##__VA_ARGS__)
 
 // Debug solo se DEBUG è definito
 #ifdef DEBUG
