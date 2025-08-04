@@ -1,3 +1,5 @@
+#ifndef USERS_H
+#define USERS_H
 
 typedef struct {
     char *username; // Nome utente (max 30 caratteri + terminatore)
@@ -36,3 +38,6 @@ void free_game(Game *game);
 int add_player_to_game(unsigned int game_id, unsigned int player_id);
 int remove_player_from_game(unsigned int game_id, unsigned int player_id);
 int get_game_owner_id(unsigned int game_id);
+char *get_game_name_by_id(unsigned int game_id);
+
+#endif // USERS_H

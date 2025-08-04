@@ -284,7 +284,7 @@ int create_game(const char *game_name, unsigned int owner_id) {
     game_arg->game_pipe_fd = game_pipe[0];
 
     if (pthread_create(&thread_id, NULL, game_thread, (void *)game_arg) != 0) {
-        LOG_DEBUG_ERROR("Errore durante la creazione del thread di gioco per la partita %d", new_game->game_id);
+        LOG_ERROR("Errore durante la creazione del thread di gioco per la partita %d", new_game->game_id);
 
         free(game_arg->game_name);
         free(game_arg);
@@ -411,7 +411,7 @@ int remove_player_from_game(unsigned int game_id, unsigned int player_id) {
  * @param game_id ID della partita di cui ottenere il proprietario.
  * @return ID del proprietario della partita, o -1 se la partita non esiste.
  */
- int get_game_owner_id(unsigned int game_id) {
+int get_game_owner_id(unsigned int game_id) {
     ListItem *node = get_node(game_id, games_list);
     int owner_id = -1;
     if (node) {
@@ -421,4 +421,27 @@ int remove_player_from_game(unsigned int game_id, unsigned int player_id) {
         }
     }
     return owner_id;
+}
+
+/**
+ * Ottiene il nome della partita associata a un ID di partita.
+ * La stringa restituita va liberata dal chiamante con free().
+ * @param game_id ID della partita di cui ottenere il nome.
+ * @return Nome della partita, o NULL se la partita non esiste.
+ */
+char *get_game_name_by_id(unsigned int game_id) {
+    ListItem *node = get_node(game_id, games_list);
+    char *game_name = NULL;
+
+    pthread_mutex_lock(&node->mutex);
+    
+    if (node->ptr) {
+        Game *game = (Game *)node->ptr;
+        if (game && game->game_name) {
+            game_name = strdup(game->game_name);
+        }
+    }
+
+    pthread_mutex_unlock(&node->mutex);
+    return game_name;
 }
