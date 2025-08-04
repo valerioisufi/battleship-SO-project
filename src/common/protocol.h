@@ -10,6 +10,8 @@ typedef enum {
     MSG_LEAVE_GAME,
     MSG_READY_TO_PLAY,
     MSG_START_GAME,
+    MSG_ATTACK,
+    MSG_SETUP_FLEET,
     MSG_GAME_ACTION
 } PlayerMsgType;
 
@@ -20,6 +22,7 @@ typedef enum {
     MSG_GAME_JOINED,
     MSG_GAME_STARTED,
     MSG_PLAYER_JOINED,
+    MSG_PLAYER_READY,
     MSG_PLAYER_LEFT,
     MSG_PLAYER_ACTION,
     MSG_GAME_STATE_UPDATE,
@@ -74,6 +77,7 @@ void freeMsg(Msg *msg);
 
 Payload *createEmptyPayload();
 int addPayloadKeyValuePair(Payload *payload, const char *key, const char *value);
+int addPayloadKeyValuePairInt(Payload *payload, const char *key, int value);
 int addPayloadList(Payload *payload);
 
 char *getPayloadValue(Payload *payload, int index, const char *key);

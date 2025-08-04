@@ -270,6 +270,15 @@ int addPayloadKeyValuePair(Payload *payload, const char *key, const char *value)
     return 0;
 }
 
+int addPayloadKeyValuePairInt(Payload *payload, const char *key, int value) {
+    if (!payload || !key) return -1;
+
+    char value_str[12];
+    snprintf(value_str, sizeof(value_str), "%d", value);
+    
+    return addPayloadKeyValuePair(payload, key, value_str);
+}
+
 
 /**
  * Aggiunge una nuova lista vuota alla fine del Payload.
@@ -320,6 +329,14 @@ char *getPayloadValue(Payload *payload, int index, const char *key) {
     return NULL; // Chiave non trovata in quella lista
 }
 
+/**
+ * Restituisce il valore intero associato a una chiave in una specifica lista del Payload.
+ * @param payload Il Payload in cui cercare.
+ * @param index L'indice della lista (0-based) in cui cercare.
+ * @param key La chiave da trovare.
+ * @param value_out Puntatore a un intero dove verrà memorizzato il valore trovato.
+ * @return 0 se il valore è stato trovato e convertito correttamente, -1 altrimenti.
+ */
 int getPayloadIntValue(Payload *payload, int index, const char *key, int *value_out) {
     if (!payload || !key || !value_out) return -1;
 
@@ -332,7 +349,9 @@ int getPayloadIntValue(Payload *payload, int index, const char *key, int *value_
 }
 
 /**
- * Restituisce il numero di liste nel Payload.
+ * Restituisce la dimensione della lista di PayloadNode in una specifica lista del Payload.
+ * @param payload Il Payload in cui cercare.
+ * @return Il numero di nodi nella lista, o 0 se il Payload è NULL o vuoto.
  */
 int getPayloadListSize(Payload *payload) {
     if (!payload) return 0;
