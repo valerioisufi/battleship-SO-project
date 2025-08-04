@@ -51,10 +51,22 @@ typedef struct {
     int x, y; // Posizione del log sullo schermo
 } GameLog;
 
+typedef enum{
+    GAME_SCREEN_STATE_PLACING_SHIPS,
+    GAME_SCREEN_STATE_PLAYING,
+    GAME_SCREEN_STATE_FINISHED
+} GameScreenState;
+
 typedef struct {
+    pthread_mutex_t mutex; // Mutex per la sincronizzazione dell'accesso allo schermo
+    
     int width; // Larghezza dello schermo
     int height; // Altezza dello schermo
-    pthread_mutex_t mutex; // Mutex per la sincronizzazione dell'accesso allo schermo
+    
+    GameScreenState game_screen_state;
+
+    int player_id; // ID del giocatore corrente
+    int adversary_player_id; // ID del giocatore avversario
 
     GameLog game_log; // Log degli eventi di gioco
 } GameScreen;
@@ -70,9 +82,11 @@ typedef enum {
 void init_game_interface();
 
 void init_game_log();
-void log_game_message(char *message);
+void log_game_message(char *fmt, ...);
 void print_game_log();
 
 void refresh_screen();
+
+void *game_ui_thread(void *arg);
 
 #endif // GAME_UI_H

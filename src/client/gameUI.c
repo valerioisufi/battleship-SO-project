@@ -7,6 +7,7 @@
 #include <signal.h>
 #include <string.h>
 #include <pthread.h>
+#include <stdarg.h>
 
 #include "client/gameUI.h"
 #include "common/game.h"
@@ -28,9 +29,8 @@ static void enable_raw_mode() {
     // Disabilita echo e modalità canonica
     raw.c_lflag &= ~(ECHO | ICANON);
 
-    // Imposta un timeout per read() per non bloccare all'infinito
-    raw.c_cc[VMIN] = 0;
-    raw.c_cc[VTIME] = 1; // Timeout di 0.1 secondi
+    raw.c_cc[VMIN] = 1;
+    raw.c_cc[VTIME] = 0; // Nessun timeout
 
     // Applica le nuove impostazioni
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
@@ -53,9 +53,11 @@ void clear_screen() {
 }
 
 static void update_window_size(GameScreen *screen) {
+    pthread_mutex_lock(&screen->mutex);
+
     struct winsize ws;
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
-        // In caso di errore, usa valori di default o gestisci come preferisci.
+        // In caso di errore, usa valori di default
         screen->width = 80;
         screen->height = 24;
         return;
@@ -65,6 +67,8 @@ static void update_window_size(GameScreen *screen) {
 
     screen->game_log.x = (screen->width - LOGS_WIDTH) / 2; // Posizione del log
     screen->game_log.y = START_LOG_Y; // Inizio del log
+
+    pthread_mutex_unlock(&screen->mutex);
 
 }
 
@@ -205,7 +209,16 @@ void init_game_log() {
 }
 
 // da utilizzare con asprintf
-void log_game_message(char *message) {
+void log_game_message(char *fmt, ...) {
+    char *message;
+    va_list args;
+    va_start(args, fmt);
+    if (vasprintf(&message, fmt, args) < 0) {
+        va_end(args);
+        exit(EXIT_FAILURE);
+    }
+    va_end(args);
+
     pthread_mutex_lock(&screen.game_log.mutex);
     // Aggiungi il messaggio al log, sovrascrivendo il più vecchio se necessario
     int index = (screen.game_log.last_index + 1) % LOG_SIZE;
@@ -276,7 +289,6 @@ void refresh_screen() {
 }
 
 EscapeSequence read_escape_sequence() {
-    char seq[3];
 
     if (getchar() == '[') {
         char c = getchar();
@@ -298,14 +310,32 @@ EscapeSequence read_escape_sequence() {
                     if((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
                         return ESCAPE_OTHER;
                     }
-                } while(c = getchar());
+                } while((c = getchar()));
                 break;
         }
     }
+
+    return ESCAPE_OTHER; // Se non è una sequenza di escape, ritorna un valore di default
 }
+
 void *game_ui_thread(void *arg) {
+    sigset_t set;
+    sigemptyset(&set);
+    sigaddset(&set, SIGWINCH); // Sblocca SIGWINCH in questo thread
+    sigaddset(&set, SIGINT); // Blocca SIGINT in questo thread
+    sigaddset(&set, SIGTERM); // Blocca SIGTERM in questo thread
+    pthread_sigmask(SIG_UNBLOCK, &set, NULL);
+
+    // sigemptyset(&set);
+    // pthread_sigmask(SIG_BLOCK, &set, NULL);
+
+    init_board(&player.board);
+    refresh_screen();
+
     while (1) {
         char c = getchar();
+        log_game_message("Input ricevuto: %d", (int)c);
+
         if (c == '\x1b'){
             switch (read_escape_sequence()) {
                 case ESCAPE_UP:
@@ -340,62 +370,4 @@ void *game_ui_thread(void *arg) {
     }
 
     return NULL;
-}
-
-void handle_sigintr(int signo) {
-    // Gestione dell'interruzione da tastiera (Ctrl+C)
-    // restore_terminal(); // Ripristina il terminale
-    exit(0); // Esce dal programma
-}
-
-int main() {
-    signal(SIGINT, handle_sigintr); // Assicura che il terminale venga ripristinato all'uscita
-    // Esempio di utilizzo
-
-    init_game_interface();
-
-    // Imposta una cella
-    // set_cell(&screen, 10, 5, 'A', 31, 40); // Rosso su verde
-
-    // Disegna una box
-    // draw_box(5, 5, 20, 10);
-    // draw_box(1,1,4,4);
-
-    player.user_id = 1;
-    player.username = "Player1";
-    init_board(&player.board);
-    place_ship(&player.board, 0, 0, 4, 0); // Posiziona una nave
-    place_ship(&player.board, 2, 3, 3, 1); // Posiziona un'altra nave
-    if(is_ship_present(&player.board, 0, 0)) {
-        log_game_message(ANSI_COLOR_GREEN "[+] Nave presente in (0, 0)\n" ANSI_COLOR_RESET);
-        set_cell(&player.board, 0, 0, 'X');
-    } else {
-        log_game_message(ANSI_COLOR_YELLOW "[-] Nave non presente in (0, 0)" ANSI_COLOR_RESET);
-        set_cell(&player.board, 0, 0, '*');
-    }
-
-    // clear_area(5, 5, 30, 15);
-    refresh_screen();
-
-
-    // log_game_message("Partita iniziata");
-    // log_game_message("Giocatore 1 ha posizionato una nave in (0, 0)");
-    // log_game_message("Giocatore 1 ha attaccato (0, 0)");
-    // log_game_message("Giocatore 1 ha attaccato (2, 2)");
-    // log_game_message("Giocatore 1 ha posizionato una nave in (2, 3)");
-    // log_game_message("Giocatore 1 ha attaccato (2, 3)");
-    // log_game_message("Giocatore 1 ha attaccato (2, 4)");
-    // log_game_message("Giocatore 1 ha attaccato (3, 3)");
-    // log_game_message("Giocatore 1 ha attaccato (4, 4)");
-    // log_game_message("Giocatore 1 ha attaccato (5, 5)");
-    // log_game_message("Giocatore 1 ha posizionato una nave in (0, 0)");
-    // log_game_message("Giocatore 1 ha attaccato (0, 0)");
-    // log_game_message("Giocatore 1 ha attaccato (2, 2)");
-    // log_game_message("Giocatore 1 ha posizionato una nave in (2, 3)");
-    // log_game_message("Giocatore 1 ha attaccato (2, 3)");
-    // log_game_message("Giocatore 1 ha attaccato (2, 4)");
-    // log_game_message("Giocatore 1 ha attaccato (3, 3)");
-    // log_game_message("Giocatore 1 ha attaccato (4, 4)");
-
-    while(1) pause(); // Aspetta un segnale per uscire
 }
