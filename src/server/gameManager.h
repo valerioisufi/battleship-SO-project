@@ -14,6 +14,6 @@ void *game_thread(void *arg);
 void cleanup_client_game(int epoll_fd, int client_fd, unsigned int player_id);
 
 int send_player_info(int client_fd, unsigned int player_id, char *username);
-int handle_player_action(unsigned int player_id, PayloadNode *payload);
+int handle_player_action(unsigned int player_id, Payload *payload);
 
 #endif // GAME_MANAGER_H

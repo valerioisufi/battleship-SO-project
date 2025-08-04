@@ -41,6 +41,7 @@ void *game_thread(void *arg) {
 
     while (1) {
         struct epoll_event events[MAX_EVENTS];
+        // TODO utilizzare il parametro timeout di epoll_wait per gestire un timer
         int nfds = epoll_wait(game_epoll_fd, events, MAX_EVENTS, -1);
 
         for(int n = 0; n < nfds; n++){
@@ -74,19 +75,6 @@ void *game_thread(void *arg) {
                     continue; // Continua ad accettare altri giocatori
                 }
 
-                for(unsigned int i = 0; i < current_game->players_count; i++) {
-                    // Invia le informazioni sui giocatori già presenti nella partita al nuovo giocatore
-                    unsigned int player_id = current_game->players[i].user_id;
-                    if (send_player_info(conn_s, player_id, current_game->players[i].username) < 0) {
-                        LOG_MSG_ERROR_TAG("Errore durante l'invio delle informazioni del giocatore %d", player_id);
-                    }
-
-                    // Invia le informazioni del nuovo giocatore a tutti gli altri giocatori
-                    int client_s = get_user_socket_fd(current_game->players[i].user_id);
-                    if (send_player_info(client_s, new_player_id, username) < 0) {
-                        LOG_MSG_ERROR_TAG("Errore durante l'invio delle informazioni del nuovo giocatore %d", new_player_id);
-                    }
-                }
 
                 free(username);
 
@@ -101,7 +89,7 @@ void *game_thread(void *arg) {
                 }
 
                 uint16_t msg_type;
-                PayloadNode *payload = NULL;
+                Payload *payload = NULL;
                 if(safeRecvMsg(client_s, &msg_type, &payload) < 0){
                     LOG_MSG_ERROR_TAG("Errore durante la ricezione del messaggio dal player %d, procedo a chiuderne la connessione...", player_id);
                     cleanup_client_game(game_epoll_fd, client_s, player_id);
@@ -109,6 +97,39 @@ void *game_thread(void *arg) {
                 }
 
                 switch(msg_type){
+                    case MSG_READY_TO_PLAY:
+                        LOG_DEBUG_TAG("Il giocatore %d è pronto a giocare", player_id);
+                        // Invia le informazioni sui giocatori già presenti nella partita al nuovo giocatore
+                        Payload *gameStatePayload = createEmptyPayload();
+                        addPayloadKeyValuePair(gameStatePayload, "type", "game_info");
+                        addPayloadKeyValuePairInt(gameStatePayload, "game_id", current_game->game_id);
+                        addPayloadKeyValuePair(gameStatePayload, "game_name", current_game->game_name);
+
+                        for(unsigned int i = 0; i < current_game->players_count; i++) {
+                            if(current_game->players[i].user_id == player_id) {
+                                // Non inviare le informazioni del giocatore che si sta unendo
+                                continue;
+                            }
+                            addPayloadList(gameStatePayload);
+                            addPayloadKeyValuePair(gameStatePayload, "type", "player_info");
+
+                            addPayloadKeyValuePairInt(gameStatePayload, "player_id", current_game->players[i].user_id);
+                            addPayloadKeyValuePair(gameStatePayload, "username", current_game->players[i].username);
+
+                            // Invia le informazioni del nuovo giocatore a tutti gli altri giocatori
+                            int client_s = get_user_socket_fd(current_game->players[i].user_id);
+                            if (send_player_info(client_s, player_id, current_game->players[player_id].username) < 0) {
+                                LOG_MSG_ERROR_TAG("Errore durante l'invio delle informazioni del nuovo giocatore %d", player_id);
+                            }
+                        }
+
+                        if (safeSendMsg(client_s, MSG_GAME_STATE_UPDATE, gameStatePayload) < 0) {
+                            LOG_MSG_ERROR_TAG("Errore durante l'invio dello stato del gioco al giocatore %d", player_id);
+                            cleanup_client_game(game_epoll_fd, client_s, player_id);
+                        }
+
+                        break;
+
                     case MSG_START_GAME:
                         if ((int)player_id == get_game_owner_id(current_game->game_id)) {
                             // Inizia il gioco
@@ -143,7 +164,7 @@ void *game_thread(void *arg) {
                         break;
                 }
 
-                freePayloadNodes(payload);
+                freePayload(payload);
                 
             }
         }
@@ -164,8 +185,9 @@ int send_player_info(int client_fd, unsigned int player_id, char *username) {
     char player_id_str[32];
     snprintf(player_id_str, sizeof(player_id_str), "%u", player_id);
 
-    PayloadNode *payload = updatePayload(NULL, "player_id", player_id_str);
-    updatePayload(payload, "username", username);
+    Payload *payload = createEmptyPayload();
+    addPayloadKeyValuePair(payload, "player_id", player_id_str);
+    addPayloadKeyValuePair(payload, "username", username);
 
     int result = safeSendMsg(client_fd, MSG_PLAYER_JOINED, payload);
     return result;
@@ -178,36 +200,36 @@ int send_player_info(int client_fd, unsigned int player_id, char *username) {
  * @param payload Payload contenente i dettagli dell'azione.
  * @return 0 se l'azione è stata gestita correttamente, -1 in caso di errore.
  */
-int handle_player_action(unsigned int player_id, PayloadNode *payload) {
-    char *action = getPayloadValue(payload, "action");
+int handle_player_action(unsigned int player_id, Payload *payload) {
+    char *action = getPayloadValue(payload, 0, "action");
     if (action == NULL) {
         LOG_ERROR_TAG("Azione non specificata per il giocatore %d", player_id);
         return -1;
     }
 
-    if(strcmp(action, "attack") == 0) {
-        // Gestisci l'attacco del giocatore
-        int x = atoi(getPayloadValue(payload, "x"));
-        int y = atoi(getPayloadValue(payload, "y"));
-        int adversary_id = atoi(getPayloadValue(payload, "adversary_id"));
-        PlayerState *player_state = get_player_state(current_game, player_id);
-        PlayerState *adversary_state = get_player_state(current_game, adversary_id);
-        if (player_state == NULL || adversary_state == NULL) {
-            LOG_ERROR("Giocatore %d o avversario %d non trovato nella partita.\n", player_id, adversary_id);
-            free(action);
-            return -1;
-        }
+    // if(strcmp(action, "attack") == 0) {
+    //     // Gestisci l'attacco del giocatore
+    //     int x = atoi(getPayloadValue(payload, 0, "x"));
+    //     int y = atoi(getPayloadValue(payload, 0, "y"));
+    //     int adversary_id = atoi(getPayloadValue(payload, 0, "adversary_id"));
+    //     PlayerState *player_state = get_player_state(current_game, player_id);
+    //     PlayerState *adversary_state = get_player_state(current_game, adversary_id);
+    //     if (player_state == NULL || adversary_state == NULL) {
+    //         LOG_ERROR("Giocatore %d o avversario %d non trovato nella partita.\n", player_id, adversary_id);
+    //         free(action);
+    //         return -1;
+    //     }
 
-        if (attack(&adversary_state->board, x, y) < 0) {
-            LOG_ERROR_TAG("Errore durante l'attacco del giocatore %d alla posizione (%d, %d)", adversary_id, x, y);
-            free(action);
-            return -1;
-        }
-    } else {
-        LOG_ERROR_TAG("Azione '%s' non riconosciuta per il giocatore %d", action, player_id);
-        free(action);
-        return -1;
-    }
+    //     if (attack(&adversary_state->board, x, y) < 0) {
+    //         LOG_ERROR_TAG("Errore durante l'attacco del giocatore %d alla posizione (%d, %d)", adversary_id, x, y);
+    //         free(action);
+    //         return -1;
+    //     }
+    // } else {
+    //     LOG_ERROR_TAG("Azione '%s' non riconosciuta per il giocatore %d", action, player_id);
+    //     free(action);
+    //     return -1;
+    // }
 
     free(action);
     return 0;
