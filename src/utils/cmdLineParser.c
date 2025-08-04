@@ -94,7 +94,8 @@ ArgvParam *setArgvParams(char *paramsName){
     ArgvParam *curr = head;
 
     char *paramsCopy = strdup(paramsName);
-    char *token = strtok(paramsCopy, ",");
+    char *saveptr;
+    char *token = strtok_r(paramsCopy, ",", &saveptr);
 
     while(token != NULL){
         ArgvParam *new = (ArgvParam *)malloc(sizeof(ArgvParam));
@@ -105,7 +106,7 @@ ArgvParam *setArgvParams(char *paramsName){
 
         curr->next = new;
         curr = new;
-        token = strtok(NULL, ",");
+        token = strtok_r(NULL, ",", &saveptr);
     }
 
     free(paramsCopy);
