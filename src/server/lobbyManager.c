@@ -20,20 +20,6 @@
 #include "common/protocol.h"
 #include "server/users.h"
 
-/**
- * Rimuove un client dal set epoll e chiude la relativa socket.
- * Utile per gestire la disconnessione e il cleanup di risorse associate a un client.
- * @param epoll_fd File descriptor dell'epoll.
- * @param client_fd File descriptor della socket del client da chiudere.
- * @param user_id ID dell'utente da rimuovere.
- */
-void cleanup_client_lobby(int epoll_fd, int client_fd, unsigned int user_id) {
-    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
-    close(client_fd);
-    remove_user(user_id); // Rimuove l'utente dalla lista degli utenti
-    LOG_INFO("Utente %d disconnesso e rimosso.\n", user_id);
-}
-
 
 /**
  * Funzione eseguita dal thread della lobby per gestire le connessioni dei client.
@@ -80,7 +66,7 @@ void *lobby_thread_main(void *arg) {
                 }
 
                 uint16_t msg_type;
-                PayloadNode *payload = NULL;
+                Payload *payload = NULL;
                 if(safeRecvMsg(client_s, &msg_type, &payload) < 0){
                     LOG_MSG_ERROR("Errore durante la ricezione del messaggio dal client %d, procedo a chiuderne la connessione...", client_s);
                     cleanup_client_lobby(lobby_epoll_fd, client_s, user_id);
@@ -109,7 +95,7 @@ void *lobby_thread_main(void *arg) {
                         break;
                 }
 
-                freePayloadNodes(payload);
+                freePayload(payload);
                 
             }
         }
@@ -117,6 +103,22 @@ void *lobby_thread_main(void *arg) {
 
     return NULL;
 }
+
+/**
+ * Rimuove un client dal set epoll e chiude la relativa socket.
+ * Utile per gestire la disconnessione e il cleanup di risorse associate a un client.
+ * @param epoll_fd File descriptor dell'epoll.
+ * @param client_fd File descriptor della socket del client da chiudere.
+ * @param user_id ID dell'utente da rimuovere.
+ */
+void cleanup_client_lobby(int epoll_fd, int client_fd, unsigned int user_id) {
+    // TODO da rivedere
+    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
+    close(client_fd);
+    remove_user(user_id); // Rimuove l'utente dalla lista degli utenti
+    LOG_INFO("Utente %d disconnesso e rimosso", user_id);
+}
+
 
 /**
  * Gestisce il messaggio di login da parte di un client.
@@ -127,8 +129,8 @@ void *lobby_thread_main(void *arg) {
  * @param client_s File descriptor della socket del client.
  * @param payload Payload del messaggio ricevuto.
  */
-void on_login_msg(int lobby_epoll_fd, unsigned int user_id, int client_s, PayloadNode *payload) {
-    char *username = getPayloadValue(payload, "username");
+void on_login_msg(int lobby_epoll_fd, unsigned int user_id, int client_s, Payload *payload) {
+    char *username = getPayloadValue(payload, 0, "username");
 
     if (username) {
         LOG_INFO("Utente `%s` si è connesso", username);
@@ -166,13 +168,13 @@ cleanup:
  * @param client_s File descriptor della socket del client.
  * @param payload Payload del messaggio ricevuto.
  */
-void on_create_game_msg(int lobby_epoll_fd, unsigned int user_id, int client_s, PayloadNode *payload) {
+void on_create_game_msg(int lobby_epoll_fd, unsigned int user_id, int client_s, Payload *payload) {
     char *username = require_authentication(lobby_epoll_fd, user_id, client_s);
     if (!username) {
         return; // Client non autenticato, già gestito in require_authentication
     }
 
-    char *game_name = getPayloadValue(payload, "game_name");
+    char *game_name = getPayloadValue(payload, 0, "game_name");
 
     if(game_name){
         int game_id = create_game(game_name, user_id);
@@ -189,7 +191,9 @@ void on_create_game_msg(int lobby_epoll_fd, unsigned int user_id, int client_s, 
             char buffer[32];
             snprintf(buffer, sizeof(buffer), "%d", game_id);
 
-            PayloadNode *payload = updatePayload(NULL, "game_id", buffer);
+            Payload *payload = createEmptyPayload();
+            addPayloadKeyValuePair(payload, "game_id", buffer);
+
             if(safeSendMsg(client_s, MSG_GAME_CREATED, payload) < 0){
                 LOG_MSG_ERROR("Errore durante l'invio del messaggio di partita creata al client `%s`", username);
                 cleanup_client_lobby(lobby_epoll_fd, client_s, user_id);
@@ -216,13 +220,13 @@ cleanup:
  * @param client_s File descriptor della socket del client.
  * @param payload Payload del messaggio ricevuto.
  */
-void on_join_game_msg(int lobby_epoll_fd, unsigned int user_id, int client_s, PayloadNode *payload){
+void on_join_game_msg(int lobby_epoll_fd, unsigned int user_id, int client_s, Payload *payload){
     char *username = require_authentication(lobby_epoll_fd, user_id, client_s);
     if (!username) {
         return; // Client non autenticato, già gestito in require_authentication
     }
 
-    char *game_id_str = getPayloadValue(payload, "game_id");
+    char *game_id_str = getPayloadValue(payload, 0, "game_id");
 
     if(game_id_str){
         char *endptr;
@@ -236,12 +240,16 @@ void on_join_game_msg(int lobby_epoll_fd, unsigned int user_id, int client_s, Pa
         unsigned int game_id = (unsigned int)tmp;
 
         if(add_player_to_game(game_id, user_id) == 0){
-            LOG_INFO("Utente %d:`%s` si è unito alla partita `%d`", user_id, username, game_id);
-            if(safeSendMsg(client_s, MSG_GAME_JOINED, NULL) < 0){
+            char *game_name = get_game_name_by_id(game_id);
+            LOG_INFO("Utente %d:`%s` si è unito alla partita %d:`%s`", user_id, username, game_id, game_name);
+            Payload *joinGamePayload = createEmptyPayload();
+            addPayloadKeyValuePair(joinGamePayload, "game_name", game_name);
+            if(safeSendMsg(client_s, MSG_GAME_JOINED, joinGamePayload) < 0){
                 LOG_MSG_ERROR("Errore durante l'invio del messaggio di partita unita al client %d:`%s`", user_id, username);
                 cleanup_client_lobby(lobby_epoll_fd, client_s, user_id);
                 goto cleanup;
             }
+            free(game_name);
             epoll_ctl(lobby_epoll_fd, EPOLL_CTL_DEL, client_s, NULL);
         } else {
             LOG_ERROR("Errore durante l'unione alla partita %d per l'utente %d.`%s`", game_id, user_id, username);
