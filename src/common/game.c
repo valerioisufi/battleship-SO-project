@@ -73,12 +73,13 @@ int add_player_to_game_state(GameState *game, int player_id, char *username) {
     }
     
     // Aggiungi il giocatore
-    game->players[game->players_count].user_id = player_id;
-    game->players[game->players_count].username = strdup(username);
-    if (!game->players[game->players_count].username) {
+    game->players[game->players_count].user.user_id = player_id;
+    game->players[game->players_count].user.username = strdup(username);
+    if (!game->players[game->players_count].user.username) {
         fprintf(stderr, "Errore durante l'allocazione della memoria per il nome utente.\n");
         return -1;
     }
+    game->players[game->players_count].fleet = NULL;
     game->players_count++;
 
     init_board(&game->players[game->players_count - 1].board); // Inizializza la griglia di gioco del nuovo giocatore
@@ -100,7 +101,7 @@ int remove_player_from_game_state(GameState *game, unsigned int player_id) {
     }
 
     for (unsigned int i = 0; i < game->players_count; i++) {
-        if (game->players[i].user_id == player_id) {
+        if (game->players[i].user.user_id == player_id) {
             // Sposta l'ultimo giocatore nella posizione corrente
             game->players[i] = game->players[game->players_count - 1];
             game->players_count--;
@@ -124,7 +125,7 @@ PlayerState *get_player_state(GameState *game, unsigned int player_id) {
     }
 
     for (unsigned int i = 0; i < game->players_count; i++) {
-        if (game->players[i].user_id == player_id) {
+        if (game->players[i].user.user_id == player_id) {
             return &game->players[i];
         }
     }
@@ -171,6 +172,34 @@ int is_ship_present(GameBoard *board, int x, int y) {
     return (board->grid[x][y] >= 'A' && board->grid[x][y] <= 'E'); // Controlla se c'è una nave nella cella
 }
 
+int can_place_ship(GameBoard *board, ShipPlacement *ship) {
+    if (board == NULL || ship == NULL) {
+        return -1; // Parametri non validi
+    }
+
+    int x = ship->x;
+    int y = ship->y;
+    int dim = ship->dim;
+    int vertical = ship->vertical;
+
+    if (x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE || dim <= 0) {
+        return -1; // Parametri non validi
+    }
+
+    if (vertical) {
+        if (y + dim > GRID_SIZE) return -1; // Fuori dai limiti verticali
+        for (int i = 0; i < dim; i++) {
+            if (board->grid[x][y + i] != '.') return -1; // Cella già occupata
+        }
+    } else {
+        if (x + dim > GRID_SIZE) return -1; // Fuori dai limiti orizzontali
+        for (int i = 0; i < dim; i++) {
+            if (board->grid[x + i][y] != '.') return -1; // Cella già occupata
+        }
+    }
+    
+    return 0; // Posizione valida per piazzare la nave
+}
 /**
  * Posiziona una nave sulla griglia di gioco.
  * @param board Puntatore alla struttura GameBoard su cui posizionare la nave.
@@ -178,42 +207,26 @@ int is_ship_present(GameBoard *board, int x, int y) {
  * @param y Coordinata Y della cella in cui posizionare la nave.
  * @return 0 se la nave è stata posizionata con successo, -1 in caso di errore.
  */
-int place_ship(GameBoard *board, int x, int y, int dim, int vertical) {
-    if (board == NULL || x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE || dim <= 0) {
+int place_ship(GameBoard *board, ShipPlacement *ship) {
+    if (board == NULL || ship == NULL) {
         return -1;
     }
     if (board->ships_left >= NUM_SHIPS) {
         return -1; // Non è possibile posizionare più navi
     }
 
-    if(!vertical) {
-        if (x + dim > GRID_SIZE) {
-            return -1; // La nave non può essere posizionata orizzontalmente
-        }
-        for (int i = 0; i < dim; i++) {
-            if (board->grid[x + i][y] != '.') {
-                return -1; // Non è possibile posizionare una nave in una cella già occupata
-            }
-        }
-        for (int i = 0; i < dim; i++) {
-            board->grid[x + i][y] = 'A' + dim - 1; // Posiziona la nave
-        }
-    } else {
-        if (y + dim > GRID_SIZE) {
-            return -1; // La nave non può essere posizionata verticalmente
-        }
-        for (int i = 0; i < dim; i++) {
-            if (board->grid[x][y + i] != '.') {
-                return -1; // Non è possibile posizionare una nave in una cella già occupata
-            }
-        }
-        for (int i = 0; i < dim; i++) {
-            board->grid[x][y + i] = 'A' + dim - 1; // Posiziona la nave
-        }
+    if (can_place_ship(board, ship) != 0) {
+        return -1; // Posizione non valida per piazzare la nave
     }
 
-    if (board->grid[x][y] != '.') {
-        return -1; // Non è possibile posizionare una nave in una cella già occupata
+    if(ship->vertical) {
+        for (int i = 0; i < ship->dim; i++) {
+            board->grid[ship->x][ship->y + i] = 'A' + ship->dim - 1; // Posiziona la nave
+        }
+    } else {
+        for (int i = 0; i < ship->dim; i++) {
+            board->grid[ship->x + i][ship->y] = 'A' + ship->dim - 1; // Posiziona la nave
+        }
     }
 
     board->ships_left++;

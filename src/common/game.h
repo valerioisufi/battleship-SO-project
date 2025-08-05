@@ -5,14 +5,29 @@
 #define NUM_SHIPS 5
 
 typedef struct {
+    unsigned int user_id; // ID dell'utente
+    char *username; // Nome utente (max 30 caratteri + terminatore), NULL se non impostato
+} UserInfo;
+
+typedef struct {
     char grid[GRID_SIZE][GRID_SIZE]; // '.' = vuoto, 'O' = nave, 'X' = colpito, '*' = mancato
     int ships_left;
 } GameBoard;
 
 typedef struct {
-    unsigned int user_id; // ID dell'utente
-    char *username; // Nome utente (max 30 caratteri + terminatore), NULL se non impostato
+    int x, y; // Coordinate della cella
+    int dim; // Dimensione della nave
+    int vertical; // 1 se la nave è verticale, 0 se orizzontale
+} ShipPlacement;
+
+typedef struct {
+    ShipPlacement ships[NUM_SHIPS]; // Posizioni delle navi da piazzare
+} FleetSetup;
+
+typedef struct {
+    UserInfo user; // Informazioni sull'utente
     GameBoard board; // La griglia di gioco dell'utente
+    FleetSetup *fleet; // Posizioni delle navi piazzate
 } PlayerState;
 
 typedef struct {
@@ -34,6 +49,7 @@ PlayerState *get_player_state(GameState *game, unsigned int player_id);
 int init_board(GameBoard *board);
 int set_cell(GameBoard *board, int x, int y, char value);
 int is_ship_present(GameBoard *board, int x, int y);
-int place_ship(GameBoard *board, int x, int y, int dim, int vertical);
+int can_place_ship(GameBoard *board, ShipPlacement *ship);
+int place_ship(GameBoard *board, ShipPlacement *ship);
 
 #endif // GAME_H
