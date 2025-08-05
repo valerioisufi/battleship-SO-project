@@ -18,14 +18,15 @@
 #include "client/clientGameManager.h"
 
 void menu(int conn_s);
-void close_connection();
+void cleanup_on_exit();
+void cleanup_and_exit_handler();
 
 int conn_socket_for_exit = -1;
 
 int main(int argc, char *argv[]){
-    atexit(close_connection); // Registra la funzione di cleanup per chiudere il socket
-    signal(SIGINT, close_connection); // Gestisce l'interruzione da tastiera (Ctrl+C)
-    signal(SIGTERM, close_connection); // Gestisce la terminazione del processo
+    atexit(cleanup_on_exit); // Registra la funzione di cleanup per chiudere il socket
+    signal(SIGINT, cleanup_and_exit_handler); // Gestisce l'interruzione da tastiera (Ctrl+C)
+    signal(SIGTERM, cleanup_and_exit_handler); // Gestisce la terminazione del processo
     signal(SIGPIPE, SIG_IGN);
 
     ArgvParam *allowedArgs = setArgvParams("RVaddress,RVport");
@@ -72,8 +73,8 @@ int main(int argc, char *argv[]){
 
     // richiedo il nome dell'utente
     printf("Inserire un nome utente (max 30 caratteri): ");
-    char *user = readAlfanumericString(30);
-    if(user == NULL){
+    char *username = readAlfanumericString(30);
+    if(username == NULL){
         LOG_ERROR("Errore durante la lettura del nome utente");
         exit(EXIT_FAILURE);
     }
@@ -81,7 +82,7 @@ int main(int argc, char *argv[]){
 
     // effettuo il login (MSG_LOGIN)
     Payload *loginPayload = createEmptyPayload();
-    addPayloadKeyValuePair(loginPayload, "username", user); // Client type C for client
+    addPayloadKeyValuePair(loginPayload, "username", username); // Client type C for client
 
     if(safeSendMsg(conn_s, MSG_LOGIN, loginPayload) < 0){
         LOG_ERROR("Errore durante l'invio del messaggio di login al server");
@@ -95,17 +96,29 @@ int main(int argc, char *argv[]){
         LOG_ERROR("Errore durante la ricezione del messaggio di benvenuto dal server");
         exit(EXIT_FAILURE);
     }
-    freePayload(payload);
+    
 
     switch(msg_type){
         case MSG_WELCOME:
-            printf("Benvenuto nel gioco!\n");
+            user = malloc(sizeof(UserInfo));
+            user->username = strdup(username); // Salvo il nome utente per l'uso futuro
+            if(getPayloadIntValue(payload, 0, "user_id", (int *)&user->user_id)){
+                LOG_ERROR("ID dell'utente non trovato nel payload");
+                free(username);
+                freePayload(payload);
+                exit(EXIT_FAILURE);
+            }
+            free(username); // Libero la memoria del nome utente
+            freePayload(payload);
+
+            printf("Benvenuto nel gioco %s!\n", user->username);
             menu(conn_s);
             break;
 
         default:
             LOG_WARNING("Messaggio non riconosciuto: %d", msg_type);
-            break;
+            freePayload(payload);
+            exit(EXIT_FAILURE);
     }
 
 
@@ -236,14 +249,14 @@ void menu(int conn_s){
     }
 }
 
-void close_connection() {
+void cleanup_on_exit() {
     if (conn_socket_for_exit >= 0) {
-        // FILE *f = fopen("tempfile", "w"); // Forza la chiusura del file descriptor
-        // fprintf(f, "Closing connection...\n");
-        // fclose(f);
         LOG_INFO("Chiusura della connessione...");
         close(conn_socket_for_exit);
         conn_socket_for_exit = -1;
     }
+}
+
+void cleanup_and_exit_handler() {
     exit(0);
 }
