@@ -1,6 +1,8 @@
 #ifndef GAME_UI_H
 #define GAME_UI_H
 
+#include "pthread.h"
+
 #define MOVE_CURSOR_FORMAT "\x1b[%d;%dH"
 #define SET_COLOR_TEXT_FORMAT "\x1b[%dm"
 #define SET_COLOR_TEXT_BG_FORMAT "\x1b[%d;%dm"
@@ -32,10 +34,10 @@
 #define BG_COLOR_CYAN    46
 #define BG_COLOR_WHITE   47
 
-#include "pthread.h"
 
-#define GRIDS_WIDTH 56 // Larghezza di due griglie affiancate
-#define LOGS_WIDTH (GRIDS_WIDTH + 32) // Larghezza del log degli eventi
+#define GRID_WIDTH 26 // Larghezza di una griglia di gioco
+#define GRID_PADDING 4 // Spazio tra le griglie
+#define LOGS_WIDTH (GRID_WIDTH * 2 + GRID_PADDING + 32) // Larghezza del log degli eventi
 #define CONTENT_WIDTH (LOGS_WIDTH + 2) // Larghezza totale del contenuto
 
 #define START_GRID_Y 2
@@ -45,9 +47,11 @@
 #define LOG_SIZE 20
 
 typedef struct {
+    pthread_mutex_t mutex;
+
     char *log[LOG_SIZE];
     int last_index; // Indice dell'ultimo messaggio
-    pthread_mutex_t mutex;
+    
     int x, y; // Posizione del log sullo schermo
 } GameLog;
 
@@ -57,6 +61,13 @@ typedef enum{
     GAME_SCREEN_STATE_FINISHED
 } GameScreenState;
 
+typedef struct{
+    int x, y; // Posizione del cursore sullo schermo
+    int x_i, y_i, x_f, y_f;
+
+    int show; // Indica se il cursore deve essere visibile
+} GameCursor;
+
 typedef struct {
     pthread_mutex_t mutex; // Mutex per la sincronizzazione dell'accesso allo schermo
     
@@ -64,9 +75,9 @@ typedef struct {
     int height; // Altezza dello schermo
     
     GameScreenState game_screen_state;
+    GameCursor cursor; // Cursore per la selezione delle celle
 
-    int player_id; // ID del giocatore corrente
-    int adversary_player_id; // ID del giocatore avversario
+    int current_showed_player; // Indice del giocatore attualmente visualizzato
 
     GameLog game_log; // Log degli eventi di gioco
 } GameScreen;
@@ -79,6 +90,7 @@ typedef enum {
     ESCAPE_OTHER // Altre sequenze di escape
 } EscapeSequence;
 
+extern GameScreen screen;
 void init_game_interface();
 
 void init_game_log();

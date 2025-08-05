@@ -10,11 +10,13 @@
 #include <stdarg.h>
 
 #include "client/gameUI.h"
+#include "client/clientGameManager.h"
 #include "common/game.h"
 #include "utils/debug.h"
 
 struct termios orig_termios;
 GameScreen screen;
+
 
 static void enter_alternate_screen() {
     printf("\x1b[?1049h");
@@ -105,8 +107,14 @@ void init_game_interface() {
     sa.sa_flags = SA_RESTART;
     sigaction(SIGWINCH, &sa, NULL);
 
+    pthread_mutex_init(&screen.mutex, NULL);
     init_game_log();
     update_window_size(&screen);
+
+    screen.cursor.x = screen.cursor.y = 0; // Inizializza la posizione del cursore
+    screen.cursor.x_i = screen.cursor.y_i = 0;
+    screen.cursor.x_f = screen.cursor.y_f = GRID_SIZE - 1;
+    screen.cursor.show = 1; // Inizialmente il cursore è visibile
 }
 
 
@@ -147,7 +155,11 @@ void draw_box(int x, int y, int width, int height) {
     fflush(stdout);
 }
 
-void draw_board(PlayerState *player, int x, int y) {
+void draw_board(PlayerState *player, int x, int y, ShipPlacement *ship_placement) {
+    if (!player) {
+        return;
+    }
+
     for (int i = 0; i < GRID_SIZE; i++) {
         printf(MOVE_CURSOR_FORMAT "%c", y + 1, x + i*2 + 6, 'A' + i);
     }
@@ -170,12 +182,14 @@ void draw_board(PlayerState *player, int x, int y) {
 
             if(cell >= 'A' && cell <= 'E') {
                 printf(SET_COLOR_TEXT_BG_FORMAT " " RESET_FORMAT, color, BG_COLOR_WHITE);
-                char cell_adjacent = player->board.grid[j + 1][i];
-                if(cell_adjacent >= 'A' && cell_adjacent <= 'E') {
-                    printf(MOVE_CURSOR_FORMAT, y + i + 3, x + j*2 + 7);
-                    printf(SET_COLOR_TEXT_BG_FORMAT " " RESET_FORMAT, color, BG_COLOR_WHITE);
-                } else {
-                    printf(" ");
+                if (j < GRID_SIZE - 1) {
+                    char cell_adjacent = player->board.grid[j + 1][i];
+                    if(cell_adjacent >= 'A' && cell_adjacent <= 'E') {
+                        printf(MOVE_CURSOR_FORMAT, y + i + 3, x + j*2 + 7);
+                        printf(SET_COLOR_TEXT_BG_FORMAT " " RESET_FORMAT, color, BG_COLOR_WHITE);
+                    } else {
+                        printf(" ");
+                    }
                 }
             } else {
                 printf(SET_COLOR_TEXT_FORMAT "%c" RESET_FORMAT, color, cell);
@@ -183,11 +197,26 @@ void draw_board(PlayerState *player, int x, int y) {
         }
     }
 
+    if(ship_placement) {
+        // Disegna la nave piazzata
+        for (int i = 0; i < ship_placement->dim; i++) {
+            int x_pos = ship_placement->vertical ? ship_placement->x : ship_placement->x + i;
+            int y_pos = ship_placement->vertical ? ship_placement->y + i : ship_placement->y;
+
+            if(x_pos < 0 || x_pos >= GRID_SIZE || y_pos < 0 || y_pos >= GRID_SIZE) {
+                continue;
+            }
+
+            int color = can_place_ship(&player->board, ship_placement) == 0 ? BG_COLOR_GREEN : BG_COLOR_YELLOW;
+
+            printf(MOVE_CURSOR_FORMAT, y + y_pos + 3, x + x_pos * 2 + 6);
+            printf(SET_COLOR_TEXT_BG_FORMAT " " RESET_FORMAT, COLOR_WHITE, color);
+        }
+    }
+
     draw_box(x + 3, y + 1, GRID_SIZE * 2 + 3, GRID_SIZE + 2); // +2 for borders
-    printf(MOVE_CURSOR_FORMAT SET_COLOR_TEXT_FORMAT HIGHLIGHT_FORMAT "%s" RESET_FORMAT, y + GRID_SIZE + 4, x + 4, COLOR_GREEN, player->username ? player->username : "Unknown Player");
 
     fflush(stdout);
-
 }
 
 void draw_legend(int x, int y) {
@@ -258,7 +287,52 @@ void print_game_log() {
     fflush(stdout);
 }
 
-PlayerState player;
+ShipPlacement ship;
+
+void refresh_board() {
+
+    pthread_mutex_lock(&game_state_mutex);
+    // clear_area((screen.width - CONTENT_WIDTH) / 2 + 1, START_GRID_Y, CONTENT_WIDTH - 2, GRID_SIZE + 3);
+    int left_padding = (screen.width - GRID_WIDTH) / 2;
+    switch(screen.game_screen_state) {
+        case GAME_SCREEN_STATE_PLACING_SHIPS:
+            LOG_INFO_FILE(client_log_file, "Stato di gioco: piazzamento navi");
+            draw_board(&game->players[0], left_padding, START_GRID_Y, &ship);
+            printf(MOVE_CURSOR_FORMAT SET_COLOR_TEXT_FORMAT HIGHLIGHT_FORMAT "%s" RESET_FORMAT " %s", START_GRID_Y + GRID_SIZE + 4, left_padding + 4, COLOR_GREEN, game->players[0].user.username ? game->players[0].user.username : "Unknown Player", "(tu)");
+
+            break;
+
+        case GAME_SCREEN_STATE_PLAYING:
+            left_padding = (screen.width - GRID_WIDTH * 2 - GRID_PADDING) / 2;
+
+            draw_board(&game->players[0], left_padding, START_GRID_Y, NULL);
+            printf(MOVE_CURSOR_FORMAT SET_COLOR_TEXT_FORMAT HIGHLIGHT_FORMAT "%s" RESET_FORMAT " %s", START_GRID_Y + GRID_SIZE + 4, left_padding + 4, COLOR_GREEN, game->players[0].user.username ? game->players[0].user.username : "Unknown Player", "(tu)");
+            if(game->players_count > 1){
+                if (screen.current_showed_player > game->players_count - 1) {
+                    screen.current_showed_player = 0;
+                }
+                draw_board(&game->players[screen.current_showed_player], left_padding + GRID_WIDTH + GRID_PADDING, START_GRID_Y, NULL);
+                printf(MOVE_CURSOR_FORMAT SET_COLOR_TEXT_FORMAT HIGHLIGHT_FORMAT "%s" RESET_FORMAT " %s", START_GRID_Y + GRID_SIZE + 4, left_padding + GRID_WIDTH + GRID_PADDING + 4, COLOR_GREEN, game->players[screen.current_showed_player].user.username ? game->players[screen.current_showed_player].user.username : "Unknown Player", "(avversario)");
+
+                if(screen.cursor.show) {
+                    printf(MOVE_CURSOR_FORMAT SET_COLOR_TEXT_FORMAT HIGHLIGHT_FORMAT " " RESET_FORMAT, screen.cursor.y + START_GRID_Y + 3, left_padding + GRID_WIDTH + GRID_PADDING + screen.cursor.x * 2 + 6, COLOR_RED);
+                }
+            } else {
+                // draw_board(NULL, left_padding + GRID_WIDTH + GRID_PADDING, START_GRID_Y, NULL);
+                printf(MOVE_CURSOR_FORMAT SET_COLOR_TEXT_FORMAT HIGHLIGHT_FORMAT "%s" RESET_FORMAT, START_GRID_Y + GRID_SIZE + 4, left_padding + GRID_WIDTH + GRID_PADDING + 4, COLOR_GREEN, "Nessun avversario");
+            }
+
+
+            break;
+
+        case GAME_SCREEN_STATE_FINISHED:
+            // Gestisci lo stato di fine partita
+            break;
+    }
+
+    pthread_mutex_unlock(&game_state_mutex);
+    
+}
 
 void refresh_screen() {
     pthread_mutex_lock(&screen.mutex);
@@ -275,11 +349,9 @@ void refresh_screen() {
     char *title = "  Battleship Game  ";
     printf(MOVE_CURSOR_FORMAT "%s", 1, (screen.width - (int)strlen(title)) / 2 + 1, title);
 
-    int left_padding = (screen.width - GRIDS_WIDTH) / 2;
-    draw_board(&player, left_padding, START_GRID_Y);
-    draw_board(&player, left_padding + 30, START_GRID_Y);
+    refresh_board();
 
-    draw_legend(left_padding, START_LEGEND_Y);
+    draw_legend((screen.width - CONTENT_WIDTH) / 2 + 4, START_LEGEND_Y);
 
     pthread_mutex_lock(&screen.game_log.mutex);
     print_game_log();
@@ -289,7 +361,6 @@ void refresh_screen() {
 }
 
 EscapeSequence read_escape_sequence() {
-
     if (getchar() == '[') {
         char c = getchar();
         switch (c) {
@@ -315,7 +386,7 @@ EscapeSequence read_escape_sequence() {
         }
     }
 
-    return ESCAPE_OTHER; // Se non è una sequenza di escape, ritorna un valore di default
+    return ESCAPE_OTHER;
 }
 
 void *game_ui_thread(void *arg) {
@@ -326,47 +397,70 @@ void *game_ui_thread(void *arg) {
     sigaddset(&set, SIGTERM); // Blocca SIGTERM in questo thread
     pthread_sigmask(SIG_UNBLOCK, &set, NULL);
 
-    // sigemptyset(&set);
-    // pthread_sigmask(SIG_BLOCK, &set, NULL);
-
-    init_board(&player.board);
+    LOG_INFO_FILE(client_log_file, "Refresh interfaccia di gioco");
     refresh_screen();
+
+    screen.game_screen_state = GAME_SCREEN_STATE_PLACING_SHIPS;
+    ship.dim = 4;
+    ship.vertical = 1;
 
     while (1) {
         char c = getchar();
-        log_game_message("Input ricevuto: %d", (int)c);
 
+        pthread_mutex_lock(&screen.mutex);
         if (c == '\x1b'){
             switch (read_escape_sequence()) {
                 case ESCAPE_UP:
-                    
+                    if(screen.cursor.y > screen.cursor.y_i) screen.cursor.y--;
                     break;
 
                 case ESCAPE_DOWN:
-                    /* code */
+                    if(screen.cursor.y < screen.cursor.y_f) screen.cursor.y++;
                     break;
 
                 case ESCAPE_RIGHT:
-                    /* code */
+                    if(screen.cursor.x < screen.cursor.x_f) screen.cursor.x++;
                     break;
 
                 case ESCAPE_LEFT:
-                    /* code */
+                    if(screen.cursor.x > screen.cursor.x_i) screen.cursor.x--;
                     break;
 
                 default:
                     break;
                 }
+            ship.x = screen.cursor.x;
+            ship.y = screen.cursor.y;
         } else {
             switch (c) {
-                case 'q':
-                    
+                case 'R':
+                case 'r':
+                    ship.vertical = !ship.vertical; // Ruota la nave
                     break;
+                case '\n':
+                    if (screen.game_screen_state == GAME_SCREEN_STATE_PLACING_SHIPS) {
+                        pthread_mutex_unlock(&screen.mutex);
+                        if (!place_ship(&game->players[0].board, &ship)) {
+                            screen.game_screen_state = GAME_SCREEN_STATE_PLAYING;
+                            log_game_message("Nave piazzata con successo. Inizia il gioco!");
+
+                        } else {
+                            // Mostra un messaggio di errore
+                            log_game_message("Impossibile piazzare la nave. Prova un'altra posizione.");
+                        }
+                        refresh_screen();
+                        continue;
+                    }
+                    break;
+                case 'C':
                 
                 default:
                     break;
             }
         }
+        
+        refresh_board();
+        pthread_mutex_unlock(&screen.mutex);
     }
 
     return NULL;
