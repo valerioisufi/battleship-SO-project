@@ -142,7 +142,10 @@ void on_login_msg(int lobby_epoll_fd, unsigned int user_id, int client_s, Payloa
             goto cleanup;
         }
 
-        if(safeSendMsg(client_s, MSG_WELCOME, NULL) < 0){
+        Payload *welcomePayload = createEmptyPayload();
+        addPayloadKeyValuePair(welcomePayload, "username", username);
+        addPayloadKeyValuePairInt(welcomePayload, "user_id", user_id);
+        if(safeSendMsg(client_s, MSG_WELCOME, welcomePayload) < 0){
             LOG_MSG_ERROR("Errore durante l'invio del messaggio di benvenuto a `%s`", username);
             cleanup_client_lobby(lobby_epoll_fd, client_s, user_id);
             goto cleanup;

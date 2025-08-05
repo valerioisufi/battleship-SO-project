@@ -13,8 +13,13 @@
 #include "common/protocol.h"
 #include "common/game.h"
 
+UserInfo *user = NULL; // Informazioni sull'utente corrente
+
 GameState *game = NULL;
+pthread_mutex_t game_state_mutex;
+
 FILE *client_log_file = NULL;
+char *log_file_path = NULL;
 
 void handle_game_msg(int conn_s, unsigned int game_id, char *game_name) {
     game = create_game_state(game_id, game_name);
@@ -22,10 +27,26 @@ void handle_game_msg(int conn_s, unsigned int game_id, char *game_name) {
         LOG_ERROR("Errore nella creazione dello stato di gioco");
         exit(EXIT_FAILURE);
     }
+    pthread_mutex_init(&game_state_mutex, NULL);
 
-    client_log_file = fopen("client.log", "w+");
+    pthread_mutex_lock(&game_state_mutex);
+    if(add_player_to_game_state(game, user->user_id, user->username)) {
+        LOG_ERROR("Errore nell'aggiunta del giocatore allo stato di gioco");
+        exit(EXIT_FAILURE);
+    }
+
+    PlayerState *player_state = get_player_state(game, user->user_id);
+    player_state->fleet = (FleetSetup *)malloc(sizeof(FleetSetup));
+    if (player_state->fleet == NULL) {
+        LOG_ERROR("Errore nell'allocazione della flotta del giocatore");
+        exit(EXIT_FAILURE);
+    }
+    pthread_mutex_unlock(&game_state_mutex);
+
+    asprintf(&log_file_path, "client_game_%d.log", getpid());
+    client_log_file = fopen(log_file_path, "w+");
     if (!client_log_file) {
-        LOG_ERROR("Errore nell'apertura del file di log client.log, usando stderr");
+        LOG_ERROR("Errore nell'apertura del file di log %s, usando stderr", log_file_path);
         client_log_file = stderr; // Fallback to stderr if log file cannot be opened
     } else {
         atexit(print_log_file);
@@ -43,17 +64,20 @@ void handle_game_msg(int conn_s, unsigned int game_id, char *game_name) {
     sigaddset(&set, SIGTERM); // Blocca SIGTERM in questo thread
     pthread_sigmask(SIG_BLOCK, &set, NULL);
 
+    LOG_INFO_FILE(client_log_file, "Inizializzazione dell'interfaccia di gioco");
     init_game_interface();
 
+    LOG_INFO_FILE(client_log_file, "Avvio del thread dell'interfaccia di gioco");
     pthread_t game_thread_id;
     if(pthread_create(&game_thread_id, NULL, game_ui_thread, (void *)conn_s) != 0) {
         LOG_ERROR_FILE(client_log_file, "Errore durante la creazione del thread di gioco");
         exit(EXIT_FAILURE);
     }
-    pthread_detach(game_thread_id); // Il thread dell'interfaccia di gioco si occuperà della sua terminazione
-
+    
+    LOG_INFO_FILE(client_log_file, "Do il benvenuto al giocatore `%s` nella partita `%s` con ID %d", user->username, game_name, game_id);
     log_game_message("Benvenuto nella partita `%s` con ID %d", game_name, game_id);
 
+    LOG_INFO_FILE(client_log_file, "Attendo che il server mi invii le informazioni sulla partita");
     if(safeSendMsg(conn_s, MSG_READY_TO_PLAY, NULL)){
         LOG_ERROR_FILE(client_log_file, "Errore durante l'invio di MSG_READY_TO_PLAY al server");
         exit(EXIT_FAILURE);
@@ -66,6 +90,8 @@ void handle_game_msg(int conn_s, unsigned int game_id, char *game_name) {
             LOG_ERROR_FILE(client_log_file, "Errore durante la ricezione del messaggio di gioco dal server");
             break;
         }
+
+        LOG_INFO_FILE(client_log_file, "Ricevuto messaggio di gioco: %d", msg_type);
 
         switch (msg_type) {
             case MSG_GAME_STATE_UPDATE: {
@@ -94,7 +120,9 @@ void handle_game_msg(int conn_s, unsigned int game_id, char *game_name) {
                             continue;
                         }
                         log_game_message("Giocatore %d (`%s`) si è unito alla partita %d", player_id, username, game->game_id);
+                        pthread_mutex_lock(&game_state_mutex);
                         add_player_to_game_state(game, player_id, username);
+                        pthread_mutex_unlock(&game_state_mutex);
 
                         free(username);
                     }
@@ -119,7 +147,9 @@ void handle_game_msg(int conn_s, unsigned int game_id, char *game_name) {
                 }
 
                 log_game_message("Giocatore %d (`%s`) si è unito alla partita %d", player_id, username, game->game_id);
+                pthread_mutex_lock(&game_state_mutex);
                 add_player_to_game_state(game, player_id, username);
+                pthread_mutex_unlock(&game_state_mutex);
 
                 free(username);
                 break;
@@ -146,6 +176,8 @@ void handle_game_msg(int conn_s, unsigned int game_id, char *game_name) {
     }
 
     LOG_INFO_FILE(client_log_file, "Chiusura della partita `%s` con ID %d", game_name, game_id);
+    pthread_cancel(game_thread_id); // Cancella il thread dell'interfaccia di gioco
+    pthread_join(game_thread_id, NULL); // Attende la terminazione del thread dell'interfaccia di gioco
     exit(0);
 }
 
@@ -220,7 +252,11 @@ void print_log_file() {
         }
 
         fclose(client_log_file);
+
+        remove(log_file_path); // Elimina il file di log dopo la stampa
         client_log_file = NULL;
+        free(log_file_path);
+        log_file_path = NULL;
     }
     LOG_INFO("File di log chiuso correttamente.");
 }

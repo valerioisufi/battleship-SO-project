@@ -106,19 +106,19 @@ void *game_thread(void *arg) {
                         addPayloadKeyValuePair(gameStatePayload, "game_name", current_game->game_name);
 
                         for(unsigned int i = 0; i < current_game->players_count; i++) {
-                            if(current_game->players[i].user_id == player_id) {
+                            if(current_game->players[i].user.user_id == player_id) {
                                 // Non inviare le informazioni del giocatore che si sta unendo
                                 continue;
                             }
                             addPayloadList(gameStatePayload);
                             addPayloadKeyValuePair(gameStatePayload, "type", "player_info");
 
-                            addPayloadKeyValuePairInt(gameStatePayload, "player_id", current_game->players[i].user_id);
-                            addPayloadKeyValuePair(gameStatePayload, "username", current_game->players[i].username);
+                            addPayloadKeyValuePairInt(gameStatePayload, "player_id", current_game->players[i].user.user_id);
+                            addPayloadKeyValuePair(gameStatePayload, "username", current_game->players[i].user.username);
 
                             // Invia le informazioni del nuovo giocatore a tutti gli altri giocatori
-                            int client_s = get_user_socket_fd(current_game->players[i].user_id);
-                            if (send_player_info(client_s, player_id, current_game->players[player_id].username) < 0) {
+                            int client_s = get_user_socket_fd(current_game->players[i].user.user_id);
+                            if (send_player_info(client_s, player_id, current_game->players[player_id].user.username) < 0) {
                                 LOG_MSG_ERROR_TAG("Errore durante l'invio delle informazioni del nuovo giocatore %d", player_id);
                             }
                         }
@@ -135,7 +135,7 @@ void *game_thread(void *arg) {
                             // Inizia il gioco
                             LOG_INFO_TAG("Il giocatore %d ha iniziato il gioco.", player_id);
                             for(unsigned int i = 0; i < current_game->players_count; i++){
-                                unsigned int player_id = current_game->players[i].user_id;
+                                unsigned int player_id = current_game->players[i].user.user_id;
                                 int client_s = get_user_socket_fd(player_id);
                                 // Invia il messaggio di inizio partita a tutti i giocatori
                                 safeSendMsg(client_s, MSG_GAME_STARTED, NULL);
@@ -147,12 +147,12 @@ void *game_thread(void *arg) {
                         break;
 
                     case MSG_GAME_ACTION:
-                        if (current_game->players[current_game->player_turn].user_id == player_id) {
+                        if (current_game->players[current_game->player_turn].user.user_id == player_id) {
                             // Gestisci l'azione del giocatore
                             handle_player_action(player_id, payload);
                             LOG_DEBUG_TAG("Il giocatore %d ha eseguito un'azione", player_id);
                             current_game->player_turn = (current_game->player_turn + 1) % current_game->players_count;
-                            safeSendMsg(get_user_socket_fd(current_game->players[current_game->player_turn].user_id), MSG_YOUR_TURN, NULL);
+                            safeSendMsg(get_user_socket_fd(current_game->players[current_game->player_turn].user.user_id), MSG_YOUR_TURN, NULL);
                         } else {
                             LOG_WARNING_TAG("Il giocatore %d ha provato a eseguire un'azione, ma non è il suo turno", player_id);
                             safeSendMsg(client_s, MSG_ERROR_NOT_YOUR_TURN, NULL);

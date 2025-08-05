@@ -39,9 +39,12 @@
     LOG_BASE("DEBUG", ANSI_COLOR_BLUE, stdout, "%s:%d " fmt, __FILE__, __LINE__, ##__VA_ARGS__)
 #define LOG_DEBUG_TAG(fmt, ...) \
     LOG_BASE_TAG("DEBUG", ANSI_COLOR_BLUE, stdout, LOG_TAG, "%s:%d " fmt, __FILE__, __LINE__, ##__VA_ARGS__)
+#define LOG_DEBUG_FILE(stream, fmt, ...) \
+    LOG_BASE("DEBUG", ANSI_COLOR_BLUE, stream, "%s:%d " fmt, __FILE__, __LINE__, ##__VA_ARGS__)
 #else
 #define LOG_DEBUG(fmt, ...) ((void)0)
 #define LOG_DEBUG_TAG(fmt, ...) ((void)0)
+#define LOG_DEBUG_FILE(stream, fmt, ...) ((void)0)
 #endif
 
 #endif // DEBUG_H
