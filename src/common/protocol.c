@@ -82,6 +82,10 @@ Msg *recvMsg(int socket_fd){
     header.payloadSize = ntohl(payloadSize_net);
 
     uint32_t payload_size = header.payloadSize;
+
+    if(header.payloadSize >= (1 << 20)) {
+        return NULL; // Payload troppo grande, errore di sicurezza
+    }
     
     char *payload_buffer = (char *)malloc(payload_size + 1);
     if(payload_buffer == NULL) {

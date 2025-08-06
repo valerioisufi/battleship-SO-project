@@ -51,6 +51,7 @@ typedef struct {
     unsigned int players_count; // Numero attuale di giocatori nella partita
     unsigned int players_capacity; // Capacità attuale dell'array dei giocatori
 
+    int *player_turn_order; // Array di ID dei giocatori in ordine di turno, NULL se non impostato
     unsigned int player_turn; // Index del giocatore  in `players` il cui turno è attivo
 } GameState;
 
@@ -68,5 +69,7 @@ int is_ship_present(GameBoard *board, int x, int y);
 int can_place_ship(GameBoard *board, ShipPlacement *ship);
 int place_ship(GameBoard *board, ShipPlacement *ship);
 int attack(PlayerState *player_state, int x, int y);
+
+void generate_turn_order(GameState *game);
 
 #endif // GAME_H

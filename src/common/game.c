@@ -40,6 +40,8 @@ GameState *create_game_state(unsigned int game_id, const char *game_name) {
         return NULL;
     }
 
+    game->player_turn_order = NULL;
+
     return game;
 }
 
@@ -104,6 +106,9 @@ int remove_player_from_game_state(GameState *game, unsigned int player_id) {
 
     for (unsigned int i = 0; i < game->players_count; i++) {
         if (game->players[i].user.user_id == player_id) {
+            free(game->players[i].user.username); // Libera il nome utente
+            free(game->players[i].fleet); // Libera la flotta se allocata
+
             // Sposta l'ultimo giocatore nella posizione corrente
             game->players[i] = game->players[game->players_count - 1];
             game->players_count--;
@@ -214,6 +219,7 @@ int can_place_ship(GameBoard *board, ShipPlacement *ship) {
     
     return 0; // Posizione valida per piazzare la nave
 }
+
 /**
  * Posiziona una nave sulla griglia di gioco.
  * @param board Puntatore alla struttura GameBoard su cui posizionare la nave.
@@ -308,4 +314,44 @@ int attack(PlayerState *player_state, int x, int y) {
     } else {
         return -2; // Già colpito o mancato
     }
+}
+
+/**
+ * Mescola un array di interi.
+ * Algoritmo di Fisher-Yates (o Knuth shuffle).
+ * @param array Puntatore all'array di interi da mescolare.
+ * @param size Dimensione dell'array.
+ */
+static void shuffle_array(int *array, unsigned int size) {
+    for (unsigned int i = size - 1; i > 0; i--) {
+        unsigned int j = rand() % (i + 1);
+        int temp = array[i];
+        array[i] = array[j];
+        array[j] = temp;
+    }
+}
+
+/**
+ * Genera un ordine di turno casuale per i giocatori della partita.
+ * Inizializza l'array `player_turn_order` con gli ID dei giocatori e lo mescola.
+ * @param game Puntatore alla struttura GameState della partita.
+ */
+void generate_turn_order(GameState *game) {
+    if (game == NULL || game->players_count == 0) {
+        return; // Nessun giocatore da ordinare
+    }
+
+    game->player_turn_order = (int *)malloc(game->players_count * sizeof(int));
+    if (game->player_turn_order == NULL) {
+        LOG_ERROR("Allocazione di memoria per player_turn_order fallita");
+        return;
+    }
+
+    for (unsigned int i = 0; i < game->players_count; i++) {
+        game->player_turn_order[i] = game->players[i].user.user_id;
+    }
+    shuffle_array(game->player_turn_order, game->players_count); // Mescola l'ordine dei giocatori
+    
+    // Inizializza l'ordine di turno
+    game->player_turn = 0;
 }
