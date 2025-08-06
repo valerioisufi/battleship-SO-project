@@ -128,7 +128,7 @@ void handle_game_msg(int conn_s, unsigned int game_id, char *game_name) {
             }
 
             switch (signal) {
-                case GAME_UI_SIGNAL_FLEET_DEPLOYED:
+                case GAME_UI_SIGNAL_FLEET_DEPLOYED:{
                     // Invia un messaggio al server per notificare che la flotta è stata piazzata
                     Payload *payload = createEmptyPayload();
                     pthread_mutex_lock(&game_state_mutex);
@@ -147,14 +147,16 @@ void handle_game_msg(int conn_s, unsigned int game_id, char *game_name) {
                         goto close_game;
                     }
                     break;
-                case GAME_UI_SIGNAL_START_GAME:
+                }
+                case GAME_UI_SIGNAL_START_GAME:{
                     // Invia un messaggio al server per notificare che il gioco può iniziare
                     if (safeSendMsg(conn_s, MSG_START_GAME, NULL) < 0) {
                         LOG_ERROR_FILE(client_log_file, "Errore durante l'invio del messaggio MSG_START_GAME al server");
                         goto close_game;
                     }
                     break;
-                case GAME_UI_SIGNAL_ATTACK:
+                }
+                case GAME_UI_SIGNAL_ATTACK:{
                     if(game->player_turn == 0){
                         Payload *attack_payload = createEmptyPayload();
                         addPayloadKeyValuePairInt(attack_payload, "player_id", attack_position.player_id);
@@ -170,7 +172,7 @@ void handle_game_msg(int conn_s, unsigned int game_id, char *game_name) {
                         LOG_WARNING_FILE(client_log_file, "Non è il turno del giocatore, ignorando l'attacco");
                     }
                     break;
-
+                }
                 default:
                     LOG_WARNING_FILE(client_log_file, "Segnale non gestito: %d", signal);
                     break;

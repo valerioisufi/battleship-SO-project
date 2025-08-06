@@ -277,7 +277,8 @@ void *game_thread(void *arg) {
                             if(count_ready_players == current_game->players_count) {
                                 LOG_INFO_TAG("Tutti i giocatori hanno piazzato le navi, il gioco può iniziare");
                                 current_game_state_type = GAME_IN_PROGRESS;
-                                current_game->player_turn = (current_game->player_turn + 1) % current_game->players_count;
+                                // TODO da sistemare, il turno dovrebbe essere gestito in modo diverso
+                                current_game->player_turn = 0; // Inizia dal primo giocatore
                                 safeSendMsg(get_user_socket_fd(current_game->players[current_game->player_turn].user.user_id), MSG_YOUR_TURN, NULL);
                                 set_epoll_timer(&timer_info, 60); // Resetta il timer a 60 secondi per il prossimo turno
                             } else {
@@ -404,8 +405,23 @@ int send_to_all_players(GameState *game, uint16_t msg_type, Payload *payload) {
  */
 void cleanup_client_game(int epoll_fd, int client_fd, unsigned int player_id) {
     // Rimuovi il client dall'epoll
-    cleanup_client_lobby(epoll_fd, client_fd, player_id);
+    // cleanup_client_lobby(epoll_fd, client_fd, player_id);
+    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
+    close(client_fd);
+    remove_user(player_id); // Rimuove l'utente dalla lista degli utenti
+    LOG_INFO_TAG("Utente %d disconnesso e rimosso", player_id);
+
     remove_player_from_game_state(current_game, player_id);
+
+    if(current_game->players_count == 0) {
+        // Se non ci sono più giocatori, distruggi lo stato del gioco
+        LOG_INFO_TAG("Non ci sono più giocatori nella partita, distruggendo lo stato del gioco");
+        remove_game(current_game->game_id); // Rimuovi la partita dallo stato del server
+        LOG_INFO_TAG("Partita %d rimossa dallo stato del server", current_game->game_id);
+
+        free_game_state(current_game);
+        pthread_exit(NULL); // Termina il thread di gioco
+    }
 
     Payload *payload = createEmptyPayload();
     addPayloadKeyValuePairInt(payload, "player_id", player_id);

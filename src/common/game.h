@@ -60,6 +60,7 @@ GameState *create_game_state(unsigned int game_id, const char *game_name);
 int add_player_to_game_state(GameState *game, int player_id, char *username);
 int remove_player_from_game_state(GameState *game, unsigned int player_id);
 PlayerState *get_player_state(GameState *game, unsigned int player_id);
+void free_game_state(GameState *game);
 
 int init_board(GameBoard *board);
 int set_cell(GameBoard *board, int x, int y, char value);

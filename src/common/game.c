@@ -135,6 +135,18 @@ PlayerState *get_player_state(GameState *game, unsigned int player_id) {
     return NULL; // Giocatore non trovato
 }
 
+void free_game_state(GameState *game) {
+    if (game == NULL) return;
+
+    for (unsigned int i = 0; i < game->players_count; i++) {
+        free(game->players[i].user.username);
+        free(game->players[i].fleet); // Libera la flotta se allocata
+    }
+    free(game->players);
+    free(game->game_name);
+    free(game);
+}
+
 /**
  * Inizializza la griglia di gioco di un giocatore.
  * @param board Puntatore alla struttura GameBoard da inizializzare.
