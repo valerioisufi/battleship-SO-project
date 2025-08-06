@@ -239,6 +239,7 @@ int create_game(const char *game_name, unsigned int owner_id) {
     }
     
     new_game->owner_id = owner_id;
+    new_game->started = 0; // Inizialmente la partita non è iniziata
     new_game->players_capacity = 8;
     new_game->players_count = 0;
     new_game->player_ids = (unsigned int *)malloc(new_game->players_capacity * sizeof(unsigned int));
@@ -351,6 +352,11 @@ int add_player_to_game(unsigned int game_id, unsigned int player_id) {
     
     Game *game = (Game *)node->ptr;
     if (game) {
+        if(game->started) {
+            LOG_WARNING("Impossibile aggiungere il giocatore %d alla partita %d, la partita è già iniziata", player_id, game_id);
+            pthread_mutex_unlock(&node->mutex);
+            return -1; // Non si può aggiungere un giocatore a una partita già iniziata
+        }
         // Se l'array dei giocatori è pieno, raddoppia la sua capacità
         if (game->players_count >= game->players_capacity) {
             size_t new_capacity = game->players_capacity * 2;
@@ -444,4 +450,17 @@ char *get_game_name_by_id(unsigned int game_id) {
 
     pthread_mutex_unlock(&node->mutex);
     return game_name;
+}
+
+void set_game_started(unsigned int game_id, int started) {
+    ListItem *node = get_node(game_id, games_list);
+    
+    pthread_mutex_lock(&node->mutex);
+    
+    Game *game = (Game *)node->ptr;
+    if (game) {
+        game->started = started;
+    }
+    
+    pthread_mutex_unlock(&node->mutex);
 }

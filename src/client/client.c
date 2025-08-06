@@ -176,6 +176,7 @@ void menu(int conn_s){
                     int game_id;
                     if(getPayloadIntValue(payload, 0, "game_id", &game_id) != -1){
                         printf("Partita creata con successo! ID: %d\n", game_id);
+                        is_owner = 1;
                         handle_game_msg(conn_s, game_id, game_name);
                     } else {
                         LOG_ERROR("ID della partita non trovato nel payload o non valido");

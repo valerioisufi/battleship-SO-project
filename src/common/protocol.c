@@ -596,17 +596,15 @@ void freePayload(Payload *payload) {
  * Se l'invio fallisce,  libera le risorse.
  * @return 0 in caso di successo, -1 in caso di errore.
  */
-int safeSendMsg(int client_fd, uint16_t msg_type, Payload *payload) {
+int safeSendMsgWithoutCleanup(int client_fd, uint16_t msg_type, Payload *payload) {
     char *serialized_payload = serializePayload(payload);
     if (!serialized_payload) {
-        freePayload(payload);
         return -1;
     }
 
     Msg *msg = createMsg(msg_type, strlen(serialized_payload), serialized_payload);
     if (!msg) {
         free(serialized_payload);
-        freePayload(payload);
         return -1;
     }
     
@@ -614,8 +612,14 @@ int safeSendMsg(int client_fd, uint16_t msg_type, Payload *payload) {
 
     // Cleanup
     freeMsg(msg);
-    freePayload(payload);
+    free(serialized_payload);
     
+    return result;
+}
+
+int safeSendMsg(int client_fd, uint16_t msg_type, Payload *payload) {
+    int result = safeSendMsgWithoutCleanup(client_fd, msg_type, payload);
+    freePayload(payload);
     return result;
 }
 

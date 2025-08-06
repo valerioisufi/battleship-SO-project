@@ -75,9 +75,8 @@ static void update_window_size(GameScreen *screen) {
 }
 
 // Signal handler per il ridimensionamento della finestra.
-static void handle_sigwinch(int signo) {
+static void handle_sigwinch() {
     update_window_size(&screen);
-
     refresh_screen();
 }
 
@@ -290,7 +289,6 @@ void print_game_log() {
 ShipPlacement ship;
 
 void refresh_board() {
-
     pthread_mutex_lock(&game_state_mutex);
     // clear_area((screen.width - CONTENT_WIDTH) / 2 + 1, START_GRID_Y, CONTENT_WIDTH - 2, GRID_SIZE + 3);
     int left_padding = (screen.width - GRID_WIDTH) / 2;
@@ -308,8 +306,8 @@ void refresh_board() {
             draw_board(&game->players[0], left_padding, START_GRID_Y, NULL);
             printf(MOVE_CURSOR_FORMAT SET_COLOR_TEXT_FORMAT HIGHLIGHT_FORMAT "%s" RESET_FORMAT " %s", START_GRID_Y + GRID_SIZE + 4, left_padding + 4, COLOR_GREEN, game->players[0].user.username ? game->players[0].user.username : "Unknown Player", "(tu)");
             if(game->players_count > 1){
-                if (screen.current_showed_player > game->players_count - 1) {
-                    screen.current_showed_player = 0;
+                if (screen.current_showed_player > game->players_count - 1 || screen.current_showed_player < 1) {
+                    screen.current_showed_player = 1;
                 }
                 draw_board(&game->players[screen.current_showed_player], left_padding + GRID_WIDTH + GRID_PADDING, START_GRID_Y, NULL);
                 printf(MOVE_CURSOR_FORMAT SET_COLOR_TEXT_FORMAT HIGHLIGHT_FORMAT "%s" RESET_FORMAT " %s", START_GRID_Y + GRID_SIZE + 4, left_padding + GRID_WIDTH + GRID_PADDING + 4, COLOR_GREEN, game->players[screen.current_showed_player].user.username ? game->players[screen.current_showed_player].user.username : "Unknown Player", "(avversario)");
@@ -390,6 +388,10 @@ EscapeSequence read_escape_sequence() {
 }
 
 void *game_ui_thread(void *arg) {
+    GameUIArg *ui_arg = (GameUIArg *)arg;
+    int pipe_fd_write = ui_arg->pipe_fd_write;
+    free(ui_arg);
+
     sigset_t set;
     sigemptyset(&set);
     sigaddset(&set, SIGWINCH); // Sblocca SIGWINCH in questo thread
@@ -401,7 +403,8 @@ void *game_ui_thread(void *arg) {
     refresh_screen();
 
     screen.game_screen_state = GAME_SCREEN_STATE_PLACING_SHIPS;
-    ship.dim = 4;
+    int ship_placed = 0;
+    ship.dim = 5;
     ship.vertical = 1;
 
     while (1) {
@@ -431,35 +434,98 @@ void *game_ui_thread(void *arg) {
                 }
             ship.x = screen.cursor.x;
             ship.y = screen.cursor.y;
+            refresh_board();
         } else {
             switch (c) {
                 case 'R':
                 case 'r':
-                    ship.vertical = !ship.vertical; // Ruota la nave
+                    if (screen.game_screen_state == GAME_SCREEN_STATE_PLACING_SHIPS) {
+                        ship.vertical = !ship.vertical; // Ruota la nave
+                    }
+                    refresh_board();
                     break;
                 case '\n':
                     if (screen.game_screen_state == GAME_SCREEN_STATE_PLACING_SHIPS) {
                         pthread_mutex_unlock(&screen.mutex);
+                        pthread_mutex_lock(&game_state_mutex);
+
                         if (!place_ship(&game->players[0].board, &ship)) {
-                            screen.game_screen_state = GAME_SCREEN_STATE_PLAYING;
-                            log_game_message("Nave piazzata con successo. Inizia il gioco!");
+                            // screen.game_screen_state = GAME_SCREEN_STATE_PLAYING;
+
+                            game->players[0].fleet->ships[ship_placed++] = ship; // Salva la nave piazzata
+                            if (ship_placed >= NUM_SHIPS) {
+                                // screen.game_screen_state = GAME_SCREEN_STATE_PLAYING;
+
+                                pthread_mutex_lock(&screen.game_log.mutex);
+                                screen.cursor.show = 0; // Nascondi il cursore
+                                pthread_mutex_unlock(&screen.game_log.mutex);
+
+                                log_game_message("Tutte le navi sono state piazzate. Inizia il gioco!");
+                                GameUISignal sig = GAME_UI_SIGNAL_FLEET_DEPLOYED;
+                                write(pipe_fd_write, &sig, sizeof(GameUISignal));
+                            } else {
+                                if (ship_placed < NUM_SHIPS) {
+                                    // ship.dim = 5 - ship_placed; // Aggiorna la dimensione della nave per il prossimo piazzamento
+                                    if(ship_placed == 1) {
+                                        ship.dim = 4; // La seconda nave è di dimensione 4
+                                    } else if(ship_placed == 2) {
+                                        ship.dim = 3; // La terza nave è di dimensione 3
+                                    } else if(ship_placed == 3) {
+                                        ship.dim = 3; // La quarta nave è di dimensione 3
+                                    } else if(ship_placed == 4) {
+                                        ship.dim = 2; // L'ultima nave è di dimensione 2
+                                    }
+                                    screen.cursor.x = screen.cursor.y = 0; // Reset del cursore
+                                    ship.x = ship.y = 0; // Reset della posizione della nave
+                                    ship.vertical = 1; // Reset della direzione
+                                }
+                                log_game_message("Nave piazzata con successo. Piazza la prossima nave.");
+                            }
 
                         } else {
-                            // Mostra un messaggio di errore
                             log_game_message("Impossibile piazzare la nave. Prova un'altra posizione.");
                         }
-                        refresh_screen();
+                        pthread_mutex_unlock(&game_state_mutex);
+
+                        pthread_mutex_lock(&screen.mutex);
+                        refresh_board();
+                        pthread_mutex_unlock(&screen.mutex);
+
                         continue;
+                    } else if( screen.game_screen_state == GAME_SCREEN_STATE_PLAYING) {
+                        pthread_mutex_lock(&attack_position_mutex);
+                        pthread_mutex_lock(&game_state_mutex);
+                        attack_position.player_id = game->players[screen.current_showed_player].user.user_id;
+                        pthread_mutex_unlock(&game_state_mutex);
+                        attack_position.x = screen.cursor.x;
+                        attack_position.y = screen.cursor.y;
+
+                        GameUISignal sig = GAME_UI_SIGNAL_ATTACK;
+                        write(pipe_fd_write, &sig, sizeof(GameUISignal));
                     }
                     break;
-                case 'C':
-                
+                case 'S':
+                    if(is_owner){
+                        GameUISignal sig = GAME_UI_SIGNAL_START_GAME;
+                        write(pipe_fd_write, &sig, sizeof(GameUISignal));
+                    }
+                    break;
+                case 'Q':
+                case 'q':
+                    screen.current_showed_player--;
+                    refresh_board();
+                    break;
+                case 'E':
+                case 'e':
+                    screen.current_showed_player++;
+                    refresh_board();
+                    break;
+
                 default:
                     break;
             }
         }
         
-        refresh_board();
         pthread_mutex_unlock(&screen.mutex);
     }
 

@@ -77,7 +77,7 @@ typedef struct {
     GameScreenState game_screen_state;
     GameCursor cursor; // Cursore per la selezione delle celle
 
-    int current_showed_player; // Indice del giocatore attualmente visualizzato
+    unsigned int current_showed_player; // Indice del giocatore attualmente visualizzato
 
     GameLog game_log; // Log degli eventi di gioco
 } GameScreen;
@@ -89,6 +89,16 @@ typedef enum {
     ESCAPE_LEFT = 'D', // Freccia sinistra
     ESCAPE_OTHER // Altre sequenze di escape
 } EscapeSequence;
+
+typedef struct {
+    int pipe_fd_write; // File descriptor per la scrittura nella pipe;
+} GameUIArg;
+
+typedef enum {
+    GAME_UI_SIGNAL_FLEET_DEPLOYED,
+    GAME_UI_SIGNAL_START_GAME,
+    GAME_UI_SIGNAL_ATTACK
+} GameUISignal;
 
 extern GameScreen screen;
 void init_game_interface();

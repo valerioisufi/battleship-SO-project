@@ -11,8 +11,7 @@ typedef enum {
     MSG_READY_TO_PLAY,
     MSG_START_GAME,
     MSG_ATTACK,
-    MSG_SETUP_FLEET,
-    MSG_GAME_ACTION
+    MSG_SETUP_FLEET
 } PlayerMsgType;
 
 typedef enum {
@@ -24,7 +23,7 @@ typedef enum {
     MSG_PLAYER_JOINED,
     MSG_PLAYER_READY,
     MSG_PLAYER_LEFT,
-    MSG_PLAYER_ACTION,
+    MSG_ATTACK_UPDATE,
     MSG_GAME_STATE_UPDATE,
     MSG_YOUR_TURN,
     MSG_ERROR_CREATE_GAME,
@@ -89,6 +88,7 @@ char *serializePayload(Payload *payload);
 
 void freePayload(Payload *payload);
 
+int safeSendMsgWithoutCleanup(int client_fd, uint16_t msg_type, Payload *payload);
 int safeSendMsg(int client_fd, uint16_t msg_type, Payload *payload);
 int safeRecvMsg(int client_fd, uint16_t *msg_type_out, Payload **payload_out);
 

@@ -17,6 +17,8 @@ typedef struct {
     unsigned int players_capacity; // Capacità attuale dell'array dei giocatori
     unsigned int players_count; // Numero attuale di giocatori nella partita
 
+    int started; // Indica se la partita è iniziata
+
     int game_pipe_fd;
 } Game;
 
@@ -39,5 +41,6 @@ int add_player_to_game(unsigned int game_id, unsigned int player_id);
 int remove_player_from_game(unsigned int game_id, unsigned int player_id);
 int get_game_owner_id(unsigned int game_id);
 char *get_game_name_by_id(unsigned int game_id);
+void set_game_started(unsigned int game_id, int started);
 
 #endif // USERS_H

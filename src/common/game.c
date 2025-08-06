@@ -7,6 +7,8 @@
 #include "game.h"
 #include "utils/debug.h"
 
+FleetRequirement fleet_requirement = {1,1,2,1,0}; // Requisiti di flotta per la partita
+
 /**
  * Crea e inizializza lo stato di una partita.
  * @param game_id ID della partita.
@@ -231,4 +233,67 @@ int place_ship(GameBoard *board, ShipPlacement *ship) {
 
     board->ships_left++;
     return 0;
+}
+
+/**
+ * Esegue un attacco su una cella specificata della griglia di gioco.
+ * @param player_state Puntatore allo stato del giocatore che esegue l'attacco.
+ * @param x Coordinata X della cella da attaccare.
+ * @param y Coordinata Y della cella da attaccare.
+ * @return 0 se l'attacco ha mancato, 1 se ha colpito una nave, 2 se ha affondato una nave, -1 in caso di errore, -2 se la cella è già stata colpita.
+ */
+int attack(PlayerState *player_state, int x, int y) {
+    if (player_state == NULL || x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE) {
+        return -1; // Parametri non validi
+    }
+    if(player_state->fleet == NULL) {
+        return -1; // Flotta non inizializzata
+    }
+
+    GameBoard *board = &player_state->board;
+    char cell = board->grid[x][y];
+    if (cell >= 'A' && cell <= 'E') {
+        board->grid[x][y] = 'X'; // Colpito
+        for (int i = 0; i < NUM_SHIPS; i++) {
+            ShipPlacement *ship = &player_state->fleet->ships[i];
+
+            if (ship->vertical) {
+                if (ship->x == x && ship->y <= y && ship->y + ship->dim > y){
+                    int hit = 0;
+                    for (int j = 0; j < ship->dim; j++) {
+                        if (board->grid[ship->x][ship->y + j] == 'X') {
+                            hit = 1;
+                        }
+                    }
+                    if(hit == ship->dim){
+                        board->ships_left--; // Se tutte le celle della nave sono colpite, decrementa il numero di navi rimaste
+                        return 2; // Colpito con successo e nave affondata
+                    }
+                    break;
+                }
+            } else {
+                if (ship->y == y && ship->x <= x && ship->x + ship->dim > x){
+                    int hit = 0;
+                    for (int j = 0; j < ship->dim; j++) {
+                        if (board->grid[ship->x + j][ship->y] == 'X') {
+                            hit = 1;
+                        }
+                    }
+                    if(hit == ship->dim){
+                        board->ships_left--; // Se tutte le celle della nave sono colpite, decrementa il numero di navi rimaste
+                        return 2; // Colpito con successo e nave affondata
+                    }
+                    break;
+                }
+            }
+
+        }
+        board->ships_left--; // Decrementa il numero di navi rimaste
+        return 1; // Colpito con successo
+    } else if (cell == '.') {
+        board->grid[x][y] = '*'; // Mancato
+        return 0; // Mancato
+    } else {
+        return -2; // Già colpito o mancato
+    }
 }

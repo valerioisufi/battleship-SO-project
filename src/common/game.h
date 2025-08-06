@@ -15,6 +15,14 @@ typedef struct {
 } GameBoard;
 
 typedef struct {
+    int dim5; // Numero di navi di dimensione 5
+    int dim4; // Numero di navi di dimensione 4
+    int dim3; // Numero di navi di dimensione 3
+    int dim2; // Numero di navi di dimensione 2
+    int dim1; // Numero di navi di dimensione 1
+} FleetRequirement;
+
+typedef struct {
     int x, y; // Coordinate della cella
     int dim; // Dimensione della nave
     int vertical; // 1 se la nave è verticale, 0 se orizzontale
@@ -23,6 +31,11 @@ typedef struct {
 typedef struct {
     ShipPlacement ships[NUM_SHIPS]; // Posizioni delle navi da piazzare
 } FleetSetup;
+
+typedef struct {
+    int player_id;
+    int x, y;
+} AttackPosition;
 
 typedef struct {
     UserInfo user; // Informazioni sull'utente
@@ -41,6 +54,8 @@ typedef struct {
     unsigned int player_turn; // Index del giocatore  in `players` il cui turno è attivo
 } GameState;
 
+extern FleetRequirement fleet_requirement; // Requisiti di flotta per la partita
+
 GameState *create_game_state(unsigned int game_id, const char *game_name);
 int add_player_to_game_state(GameState *game, int player_id, char *username);
 int remove_player_from_game_state(GameState *game, unsigned int player_id);
@@ -51,5 +66,6 @@ int set_cell(GameBoard *board, int x, int y, char value);
 int is_ship_present(GameBoard *board, int x, int y);
 int can_place_ship(GameBoard *board, ShipPlacement *ship);
 int place_ship(GameBoard *board, ShipPlacement *ship);
+int attack(PlayerState *player_state, int x, int y);
 
 #endif // GAME_H

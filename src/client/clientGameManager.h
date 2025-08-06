@@ -6,9 +6,13 @@
 #include "common/game.h"
 
 extern UserInfo *user;
+extern int is_owner;
 
 extern GameState *game;
 extern pthread_mutex_t game_state_mutex;
+
+extern AttackPosition attack_position;
+extern pthread_mutex_t attack_position_mutex;
 
 extern FILE *client_log_file;
 
