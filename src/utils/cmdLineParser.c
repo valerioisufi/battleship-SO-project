@@ -102,6 +102,8 @@ ArgvParam *setArgvParams(char *paramsName){
         new->paramName = strdup(token+2);
         new->isParamRequired = (token[0] == 'R') ? 1 : 0;
         new->isValueRequired = (token[1] == 'V') ? 1 : 0;
+        new->isSet = 0;
+        new->paramValue = NULL;
         new->next = NULL;
 
         curr->next = new;

@@ -5,7 +5,7 @@
 #include <errno.h>
 
 #include <sys/socket.h>
-#include <sys/epoll.h>
+#include <arpa/inet.h>
 #include "common/protocol.h"
 #include "utils/userInput.h"
 
@@ -66,15 +66,23 @@ int recvByteStream(int socket_fd, char *buffer, size_t num_bytes){
  * 
  */
 Msg *recvMsg(int socket_fd){
-    char header_buffer[HEADER_SIZE];
-    if(recvByteStream(socket_fd, header_buffer, HEADER_SIZE) == -1){
+    uint16_t msgType_net;
+    uint32_t payloadSize_net;
+
+    if (recvByteStream(socket_fd, (char *)&msgType_net, sizeof(uint16_t)) == -1) {
+        return NULL;
+    }
+
+    if (recvByteStream(socket_fd, (char *)&payloadSize_net, sizeof(uint32_t)) == -1) {
         return NULL;
     }
 
     Header header;
-    memcpy(&header, header_buffer, HEADER_SIZE);
-    uint32_t payload_size = header.payloadSize;
+    header.msgType = ntohs(msgType_net);
+    header.payloadSize = ntohl(payloadSize_net);
 
+    uint32_t payload_size = header.payloadSize;
+    
     char *payload_buffer = (char *)malloc(payload_size + 1);
     if(payload_buffer == NULL) {
         return NULL; // Errore di allocazione
@@ -88,6 +96,7 @@ Msg *recvMsg(int socket_fd){
     // a questo punto dispongo del messaggio completo
     Msg *msg = (Msg *)malloc(sizeof(Msg));
     if(msg == NULL) {
+        free(payload_buffer);
         return NULL; // Errore di allocazione
     }
 
@@ -107,9 +116,14 @@ Msg *recvMsg(int socket_fd){
  * La funzione invia prima l'header e poi il payload, assicurandosi che tutti i byte vengano trasmessi.
  */
 int sendMsg(int socket_fd, Msg *msg){
-    char *header_buffer = (char *)&msg->header;
+    uint16_t msgType_net = htons(msg->header.msgType);
+    uint32_t payloadSize_net = htonl(msg->header.payloadSize);
 
-    if(sendByteStream(socket_fd, header_buffer, HEADER_SIZE) == -1){
+    if (sendByteStream(socket_fd, (char *)&msgType_net, sizeof(uint16_t)) == -1) {
+        return -1;
+    }
+
+    if (sendByteStream(socket_fd, (char *)&payloadSize_net, sizeof(uint32_t)) == -1) {
         return -1;
     }
 
