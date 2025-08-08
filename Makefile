@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -g -Isrc -DDEBUG
+CFLAGS = -Wall -Wextra -pedantic -g -Isrc -DDEBUG
 LDFLAGS = -lpthread
 SRC_DIR = src
 

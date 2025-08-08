@@ -26,10 +26,19 @@ void *game_thread(void *arg);
 
 void cleanup_client_game(int epoll_fd, int client_fd, unsigned int player_id);
 
-int send_player_info(int client_fd, unsigned int player_id, char *username);
-int send_to_all_players(GameState *game, uint16_t msg_type, Payload *payload);
+void on_ready_to_play_msg(int game_epoll_fd, int client_s, unsigned int player_id);
+void on_setup_fleet_msg(int game_epoll_fd, int client_s, unsigned int player_id, Payload *payload);
+void on_start_game_msg(int game_epoll_fd, int client_s, unsigned int player_id);
+void on_attack_msg(int game_epoll_fd, int client_s, unsigned int player_id, Payload *payload);
+
+void on_malformed_game_msg(int game_epoll_fd, int client_s, unsigned int player_id);
+void on_unexpected_game_msg(int game_epoll_fd, int client_s, unsigned int player_id, uint16_t msg_type);
+void on_error_player_action_msg(int game_epoll_fd, int client_s, unsigned int player_id);
+
+void send_to_all_players(GameState *game, uint16_t msg_type, Payload *payload, int except_player_id);
+void update_turn_order(GameState *game, int game_epoll_fd);
 
 void set_epoll_timer(TimerInfo *timer_info, int duration);
-void update_epoll_timer(TimerInfo *timer_info);
+int get_epoll_timer(TimerInfo *timer_info);
 
 #endif // GAME_MANAGER_H

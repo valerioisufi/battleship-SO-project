@@ -41,6 +41,8 @@ GameState *create_game_state(unsigned int game_id, const char *game_name) {
     }
 
     game->player_turn_order = NULL;
+    game->player_turn_order_count = 0;
+    game->player_turn = 0;
 
     return game;
 }
@@ -258,7 +260,7 @@ int place_ship(GameBoard *board, ShipPlacement *ship) {
  * @param player_state Puntatore allo stato del giocatore che esegue l'attacco.
  * @param x Coordinata X della cella da attaccare.
  * @param y Coordinata Y della cella da attaccare.
- * @return 0 se l'attacco ha mancato, 1 se ha colpito una nave, 2 se ha affondato una nave, -1 in caso di errore, -2 se la cella è già stata colpita.
+ * @return 0 se l'attacco ha mancato, 1 se ha colpito una nave, 2 se ha affondato una nave, 3 se ha eliminato un giocatore, -1 in caso di errore, -2 se la cella è già stata colpita.
  */
 int attack(PlayerState *player_state, int x, int y) {
     if (player_state == NULL || x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE) {
@@ -299,6 +301,9 @@ int attack(PlayerState *player_state, int x, int y) {
                     }
                     if(hit == ship->dim){
                         board->ships_left--; // Se tutte le celle della nave sono colpite, decrementa il numero di navi rimaste
+                        if(board->ships_left == 0){
+                            return 3; // Giocatore eliminato
+                        }
                         return 2; // Colpito con successo e nave affondata
                     }
                     break;
@@ -346,6 +351,8 @@ void generate_turn_order(GameState *game) {
         LOG_ERROR("Allocazione di memoria per player_turn_order fallita");
         return;
     }
+
+    game->player_turn_order_count = game->players_count;
 
     for (unsigned int i = 0; i < game->players_count; i++) {
         game->player_turn_order[i] = game->players[i].user.user_id;
