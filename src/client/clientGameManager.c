@@ -52,7 +52,7 @@ void handle_game_msg(int conn_s, unsigned int game_id, char *game_name) {
     client_log_file = fopen(log_file_path, "w+");
     if (!client_log_file) {
         LOG_ERROR("Errore nell'apertura del file di log %s, usando stderr", log_file_path);
-        client_log_file = stderr; // Fallback to stderr if log file cannot be opened
+        client_log_file = stderr;
     } else {
         atexit(print_log_file);
     }
@@ -94,7 +94,7 @@ void handle_game_msg(int conn_s, unsigned int game_id, char *game_name) {
     LOG_INFO_FILE(client_log_file, "Do il benvenuto al giocatore `%s` nella partita `%s` con ID %d", user->username, game_name, game_id);
     log_game_message("Benvenuto nella partita `%s` con ID %d", game_name, game_id);
 
-    LOG_INFO_FILE(client_log_file, "Attendo che il server mi invii le informazioni sulla partita");
+    LOG_DEBUG_FILE(client_log_file, "Attendo che il server mi invii le informazioni sulla partita");
     if(safeSendMsg(conn_s, MSG_READY_TO_PLAY, NULL)){
         LOG_ERROR_FILE(client_log_file, "Errore durante l'invio di MSG_READY_TO_PLAY al server");
         exit(EXIT_FAILURE);
@@ -189,139 +189,39 @@ void handle_game_msg(int conn_s, unsigned int game_id, char *game_name) {
                 break;
             }
 
-            LOG_INFO_FILE(client_log_file, "Ricevuto messaggio di gioco: %d", msg_type);
+            LOG_DEBUG_FILE(client_log_file, "Ricevuto messaggio di gioco: %d", msg_type);
 
             switch (msg_type) {
                 case MSG_GAME_STATE_UPDATE: {
-                    // Gestisci l'aggiornamento dello stato del gioco
-                    int payload_size = getPayloadListSize(payload);
-                    for(int i = 0; i < payload_size; i++) {
-                        char *key = getPayloadValue(payload, i, "type");
-                        if (key == NULL) {
-                            LOG_ERROR_FILE(client_log_file, "Tipo di messaggio non specificato nel payload");
-                            continue;
-                        }
-
-                        if (strcmp(key, "game_info") == 0) {
-                            // Gestisci le informazioni del gioco
-                            continue;
-                        } else if (strcmp(key, "player_info") == 0) {
-                            // Gestisci le informazioni del giocatore
-                            int player_id;
-                            if (getPayloadIntValue(payload, i, "player_id", &player_id) < 0) {
-                                LOG_ERROR_FILE(client_log_file, "ID del giocatore non trovato nel payload");
-                                continue;
-                            }
-                            char *username = getPayloadValue(payload, i, "username");
-                            if (username == NULL) {
-                                LOG_ERROR_FILE(client_log_file, "Nome utente non trovato nel payload");
-                                continue;
-                            }
-                            log_game_message("Giocatore %d (`%s`) si è unito alla partita %d", player_id, username, game->game_id);
-                            pthread_mutex_lock(&game_state_mutex);
-                            add_player_to_game_state(game, player_id, username);
-                            pthread_mutex_unlock(&game_state_mutex);
-
-                            free(username);
-                        }
-
-                        free(key);
-                    }
-
+                    on_game_state_update_msg(payload);
                     break;
                 }
                 case MSG_PLAYER_JOINED: {
-                    int player_id;
-                    if (getPayloadIntValue(payload, 0, "player_id", &player_id) < 0) {
-                        LOG_ERROR_FILE(client_log_file, "ID del giocatore non trovato nel payload");
-                        freePayload(payload);
-                        continue;
-                    }
-                    char *username = getPayloadValue(payload, 0, "username");
-                    if(username == NULL) {
-                        LOG_ERROR_FILE(client_log_file, "Nome utente non trovato nel payload");
-                        freePayload(payload);
-                        continue;
-                    }
-
-                    log_game_message("Giocatore %d (`%s`) si è unito alla partita %d", player_id, username, game->game_id);
-                    pthread_mutex_lock(&game_state_mutex);
-                    add_player_to_game_state(game, player_id, username);
-                    pthread_mutex_unlock(&game_state_mutex);
-
-                    free(username);
+                    on_player_joined_msg(payload);
                     break;
                 }
                 case MSG_PLAYER_LEFT: {
-                    int player_id;
-                    if (getPayloadIntValue(payload, 0, "player_id", &player_id) < 0) {
-                        LOG_ERROR_FILE(client_log_file, "ID del giocatore non trovato nel payload");
-                        freePayload(payload);
-                        continue;
-                    }
-                    log_game_message("Il giocatore %d ha lasciato la partita %d", player_id, game->game_id);
-                    pthread_mutex_lock(&game_state_mutex);
-                    remove_player_from_game_state(game, player_id);
-                    pthread_mutex_unlock(&game_state_mutex);
+                    on_player_left_msg(payload);
                     break;
                 }
                 case MSG_GAME_STARTED: {
-                    log_game_message("La partita `%s` con ID %d è iniziata!", game->game_name, game->game_id);
-                    pthread_mutex_lock(&screen.mutex);
-                    screen.game_screen_state = GAME_SCREEN_STATE_PLAYING;
-                    screen.cursor.show = 1;
-                    pthread_mutex_unlock(&screen.mutex);
-                    refresh_screen();
+                    on_game_started_msg();
+                    break;
+                }
+                case MSG_TURN_ORDER_UPDATE: {
+                    on_turn_order_update_msg(payload);
+                    break;
+                }
+                case MSG_YOUR_TURN: {
+                    on_your_turn_msg();
                     break;
                 }
                 case MSG_ATTACK_UPDATE: {
-                    int attacker_id, attacked_id, x, y;
-                    if (getPayloadIntValue(payload, 0, "attacker_id", &attacker_id) < 0 ||
-                        getPayloadIntValue(payload, 0, "attacked_id", &attacked_id) < 0 ||
-                        getPayloadIntValue(payload, 0, "x", &x) < 0 ||
-                        getPayloadIntValue(payload, 0, "y", &y) < 0) {
-                        LOG_ERROR_FILE(client_log_file, "Informazioni sull'attacco non trovate nel payload");
-                        freePayload(payload);
-                        continue;
-                    }
-                    char *result = getPayloadValue(payload, 0, "result");
-                    if (result == NULL) {
-                        LOG_ERROR_FILE(client_log_file, "Risultato dell'attacco non trovato nel payload");
-                        freePayload(payload);
-                        continue;
-                    }
-
-                    pthread_mutex_lock(&game_state_mutex);
-                    PlayerState *attacked_state = get_player_state(game, attacked_id);
-                    if (attacked_state == NULL) {
-                        LOG_ERROR_FILE(client_log_file, "Giocatore con ID %d non trovato nello stato del gioco", attacker_id);
-                        free(result);
-                        freePayload(payload);
-                        pthread_mutex_unlock(&game_state_mutex);
-                        continue;
-                    }
-                    GameBoard *attacked_board = &attacked_state->board;
-
-
-                    if(strcmp(result, "hit") == 0) {
-                        log_game_message("Il giocatore %d ha colpito la posizione (%d, %d)", attacker_id, x, y);
-                        set_cell(attacked_board, x, y, 'X'); // Colpito
-                    } else if (strcmp(result, "miss") == 0) {
-                        log_game_message("Il giocatore %d ha mancato la posizione (%d, %d)", attacker_id, x, y);
-                        set_cell(attacked_board, x, y, '*'); // Mancato
-                    } else if (strcmp(result, "sunk") == 0) {
-                        log_game_message("Il giocatore %d ha affondato una nave alla posizione (%d, %d)", attacker_id, x, y);
-                        set_cell(attacked_board, x, y, 'X'); // Colpito
-                        attacked_board->ships_left--; // Decrementa le navi rimaste
-                    } else {
-                        LOG_ERROR_FILE(client_log_file, "Risultato dell'attacco non riconosciuto: %s", result);
-                    }
-
-                    pthread_mutex_unlock(&game_state_mutex);
+                    on_attack_update_msg(payload);
                     break;
                 }
                 default:
-                    handle_generic_msg(msg_type, payload);
+                    handle_generic_msg(msg_type);
                     break;
             }
 
@@ -336,45 +236,190 @@ close_game:
     exit(0);
 }
 
-int handle_player_action(int player_id, Payload *payload) {
-    char *action = getPayloadValue(payload, 0, "action");
-    if (action == NULL) {
-        LOG_ERROR("Azione non specificata per il giocatore %d", player_id);
-        return -1;
+
+void on_game_state_update_msg(Payload *payload) {
+    LOG_DEBUG_FILE(client_log_file, "Ricevuto MSG_GAME_STATE_UPDATE");
+    // Gestisci l'aggiornamento dello stato del gioco
+    int payload_size = getPayloadListSize(payload);
+    for(int i = 0; i < payload_size; i++) {
+        char *key = getPayloadValue(payload, i, "type");
+        if (key == NULL) {
+            LOG_ERROR_FILE(client_log_file, "Tipo di messaggio non specificato nel payload");
+            continue;
+        }
+
+        if (strcmp(key, "game_info") == 0) {
+            // Gestisci le informazioni del gioco
+        } else if (strcmp(key, "player_info") == 0) {
+            // Gestisci le informazioni del giocatore
+            int player_id;
+            if (getPayloadIntValue(payload, i, "player_id", &player_id) < 0) {
+                LOG_ERROR_FILE(client_log_file, "ID del giocatore non trovato nel payload");
+                free(key);
+                continue;
+            }
+            char *username = getPayloadValue(payload, i, "username");
+            if (username == NULL) {
+                LOG_ERROR_FILE(client_log_file, "Nome utente non trovato nel payload");
+                free(key);
+                continue;
+            }
+            log_game_message("Giocatore %d (`%s`) si è unito alla partita %d", player_id, username, game->game_id);
+            pthread_mutex_lock(&game_state_mutex);
+            add_player_to_game_state(game, player_id, username);
+            pthread_mutex_unlock(&game_state_mutex);
+
+            free(username);
+        }
+
+        free(key);
+    }
+}
+
+void on_player_joined_msg(Payload *payload){
+    LOG_DEBUG_FILE(client_log_file, "Ricevuto MSG_PLAYER_JOINED");
+    int player_id;
+    if (getPayloadIntValue(payload, 0, "player_id", &player_id) < 0) {
+        LOG_ERROR_FILE(client_log_file, "ID del giocatore non trovato nel payload");
+        return;
+    }
+    char *username = getPayloadValue(payload, 0, "username");
+    if(username == NULL) {
+        LOG_ERROR_FILE(client_log_file, "Nome utente non trovato nel payload");
+        return;
     }
 
-    // if (strcmp(action, "attack") == 0) {
-    //     int x = atoi(getPayloadValue(payload, 0, "x"));
-    //     int y = atoi(getPayloadValue(payload, 0, "y"));
-    //     int adversary_id = atoi(getPayloadValue(payload, 0, "adversary_id"));
+    log_game_message("Giocatore %d (`%s`) si è unito alla partita %d", player_id, username, game->game_id);
+    pthread_mutex_lock(&game_state_mutex);
+    add_player_to_game_state(game, player_id, username);
+    pthread_mutex_unlock(&game_state_mutex);
 
-    //     PlayerState *player_state = get_player_state(game, player_id);
-    //     PlayerState *adversary_state = get_player_state(game, adversary_id);
-    //     if (player_state == NULL || adversary_state == NULL) {
-    //         LOG_ERROR("Giocatore %d o avversario %d non trovato nella partita.", player_id, adversary_id);
-    //         free(action);
-    //         return -1;
-    //     }
+    free(username);
 
-    //     if (attack(&adversary_state->board, x, y) < 0) {
-    //         LOG_ERROR("Errore durante l'attacco del giocatore %d alla posizione (%d, %d)", adversary_id, x, y);
-    //         free(action);
-    //         return -1;
-    //     }
-    // } else {
-    //     LOG_ERROR("Azione '%s' non riconosciuta per il giocatore %d", action, player_id);
-    // }
-
-    free(action);
-    return 0;
 }
+
+void on_player_left_msg(Payload *payload) {
+    LOG_DEBUG_FILE(client_log_file, "Ricevuto MSG_PLAYER_LEFT");
+    int player_id;
+    if (getPayloadIntValue(payload, 0, "player_id", &player_id) < 0) {
+        LOG_ERROR_FILE(client_log_file, "ID del giocatore non trovato nel payload");
+        return;
+    }
+    PlayerState *player_state = get_player_state(game, player_id);
+    if (player_state == NULL) {
+        LOG_ERROR_FILE(client_log_file, "Stato del giocatore non trovato");
+        return;
+    }
+
+    log_game_message("Il giocatore %d (`%s`) ha lasciato la partita %d", player_id, player_state->user.username, game->game_id);
+    pthread_mutex_lock(&game_state_mutex);\
+    remove_player_from_game_state(game, player_id);
+    pthread_mutex_unlock(&game_state_mutex);
+    
+}
+
+void on_game_started_msg(){
+    LOG_DEBUG_FILE(client_log_file, "Ricevuto MSG_GAME_STARTED");
+    log_game_message("La partita `%s` con ID %d è iniziata!", game->game_name, game->game_id);
+    pthread_mutex_lock(&screen.mutex);
+    screen.game_screen_state = GAME_SCREEN_STATE_PLAYING;
+    screen.cursor.show = 1;
+    pthread_mutex_unlock(&screen.mutex);
+    refresh_screen();
+}
+
+void on_turn_order_update_msg(Payload *payload){
+    int payload_size = getPayloadListSize(payload);
+    if (payload_size <= 0) {
+        LOG_ERROR_FILE(client_log_file, "Nessun giocatore trovato nell'ordine dei turni");
+        return;
+    }
+
+    pthread_mutex_lock(&game_state_mutex);
+    game->player_turn_order_count = payload_size;
+    game->player_turn_order = realloc(game->player_turn_order, sizeof(int) * payload_size);
+    if (game->player_turn_order == NULL) {
+        LOG_ERROR_FILE(client_log_file, "Errore durante la riallocazione dell'array di ordine dei turni");
+        pthread_mutex_unlock(&game_state_mutex);
+        return;
+    }
+
+    for (int i = 0; i < payload_size; i++) {
+        int player_id;
+        if (getPayloadIntValue(payload, i, "player_id", &player_id) < 0) {
+            LOG_ERROR_FILE(client_log_file, "ID del giocatore non trovato nel payload");
+            continue;
+        }
+        game->player_turn_order[i] = player_id;
+    }
+
+    pthread_mutex_unlock(&game_state_mutex);
+
+    log_game_message("Ordine dei turni aggiornato: ");
+    for (int i = 0; i < payload_size; i++) {
+        log_game_message("Giocatore %d", game->player_turn_order[i]);
+    }
+
+}
+
+void on_your_turn_msg(){
+    log_game_message("È il tuo turno di giocare! Effettua la tua mossa...");
+    pthread_mutex_lock(&game_state_mutex);
+    game->player_turn = 1; // Imposta il turno del giocatore corrente a 1 = tu
+    pthread_mutex_unlock(&game_state_mutex);
+}
+
+void on_attack_update_msg(Payload *payload) {
+    int attacker_id, attacked_id, x, y;
+    if (getPayloadIntValue(payload, 0, "attacker_id", &attacker_id) < 0 ||
+        getPayloadIntValue(payload, 0, "attacked_id", &attacked_id) < 0 ||
+        getPayloadIntValue(payload, 0, "x", &x) < 0 ||
+        getPayloadIntValue(payload, 0, "y", &y) < 0) {
+        LOG_ERROR_FILE(client_log_file, "Informazioni sull'attacco non trovate nel payload");
+        return;
+    }
+    char *result = getPayloadValue(payload, 0, "result");
+    if (result == NULL) {
+        LOG_ERROR_FILE(client_log_file, "Risultato dell'attacco non trovato nel payload");
+        return;
+    }
+
+    pthread_mutex_lock(&game_state_mutex);
+    PlayerState *attacked_state = get_player_state(game, attacked_id);
+    if (attacked_state == NULL) {
+        LOG_ERROR_FILE(client_log_file, "Giocatore con ID %d non trovato nello stato del gioco", attacker_id);
+        free(result);
+        pthread_mutex_unlock(&game_state_mutex);
+        return;
+    }
+    GameBoard *attacked_board = &attacked_state->board;
+
+
+    if(strcmp(result, "hit") == 0) {
+        log_game_message("Il giocatore %d ha colpito la posizione (%d, %d)", attacker_id, x, y);
+        set_cell(attacked_board, x, y, 'X'); // Colpito
+    } else if (strcmp(result, "miss") == 0) {
+        log_game_message("Il giocatore %d ha mancato la posizione (%d, %d)", attacker_id, x, y);
+        set_cell(attacked_board, x, y, '*'); // Mancato
+    } else if (strcmp(result, "sunk") == 0) {
+        log_game_message("Il giocatore %d ha affondato una nave alla posizione (%d, %d)", attacker_id, x, y);
+        set_cell(attacked_board, x, y, 'X'); // Colpito
+        attacked_board->ships_left--; // Decrementa le navi rimaste
+    } else {
+        LOG_ERROR_FILE(client_log_file, "Risultato dell'attacco non riconosciuto: %s", result);
+    }
+
+    pthread_mutex_unlock(&game_state_mutex);
+
+}
+
 
 /**
  * Gestisce i messaggi generici ricevuti dal server.
  * @param msg_type Il tipo di messaggio.
  * @param payload Il payload del messaggio.
  */
-void handle_generic_msg(uint16_t msg_type, Payload *payload) {
+void handle_generic_msg(uint16_t msg_type) {
 
     switch(msg_type) {
         case MSG_ERROR_UNEXPECTED_MESSAGE:
@@ -393,7 +438,6 @@ void handle_generic_msg(uint16_t msg_type, Payload *payload) {
             LOG_WARNING_FILE(client_log_file, "Messaggio non riconosciuto: %d", msg_type);
             break;
     }
-    freePayload(payload);
 }
 
 void print_log_file() {

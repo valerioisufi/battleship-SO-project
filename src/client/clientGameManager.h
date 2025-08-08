@@ -18,8 +18,16 @@ extern FILE *client_log_file;
 
 
 void handle_game_msg(int conn_s, unsigned int game_id, char *game_name);
-int handle_player_action(int player_id, Payload *payload);
-void handle_generic_msg(uint16_t msg_type, Payload *payload);
+
+void on_game_state_update_msg(Payload *payload);
+void on_player_joined_msg(Payload *payload);
+void on_player_left_msg(Payload *payload);
+void on_game_started_msg();
+void on_turn_order_update_msg(Payload *payload);
+void on_your_turn_msg();
+void on_attack_update_msg(Payload *payload);
+
+void handle_generic_msg(uint16_t msg_type);
 
 void print_log_file();
 
