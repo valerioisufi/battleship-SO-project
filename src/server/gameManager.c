@@ -61,7 +61,6 @@ void *game_thread(void *arg) {
                         }
                     }
                     current_game_state_type = GAME_IN_PROGRESS;
-                    send_to_all_players(current_game, MSG_GAME_STARTED, NULL, -1);
 
                     update_turn_order(current_game, game_epoll_fd);
                 } else if(current_game_state_type == GAME_IN_PROGRESS) {
@@ -291,9 +290,7 @@ void on_setup_fleet_msg(int game_epoll_fd, int client_s, unsigned int player_id,
             if(count_ready_players == current_game->players_count) {
                 LOG_INFO_TAG("Tutti i giocatori hanno piazzato le navi, il gioco può iniziare");
                 current_game_state_type = GAME_IN_PROGRESS;
-                send_to_all_players(current_game, MSG_GAME_STARTED, NULL, -1);
                 update_turn_order(current_game, game_epoll_fd);
-
             }
         }
     } else {
@@ -338,7 +335,6 @@ void on_start_game_msg(int game_epoll_fd, int client_s, unsigned int player_id){
         if(count_ready_players == current_game->players_count) {
             LOG_INFO_TAG("Tutti i giocatori hanno piazzato le navi, il gioco può iniziare");
             current_game_state_type = GAME_IN_PROGRESS;
-            send_to_all_players(current_game, MSG_GAME_STARTED, NULL, -1);
 
             update_turn_order(current_game, game_epoll_fd);
         } else {
@@ -561,7 +557,7 @@ void update_turn_order(GameState *game, int game_epoll_fd){
             addPayloadKeyValuePairInt(payload, "player_id", game->player_turn_order[i]);
         }
 
-        send_to_all_players(game, MSG_TURN_ORDER_UPDATE, payload, -1);
+        send_to_all_players(game, MSG_GAME_STARTED, payload, -1);
     }
 
     while(1){
@@ -574,14 +570,19 @@ void update_turn_order(GameState *game, int game_epoll_fd){
             game->player_turn_order[game->player_turn] = -1;
             continue; // Errore, impossibile ottenere il file descriptor
         }
+
+        Payload *turn_payload = createEmptyPayload();
+        addPayloadKeyValuePairInt(turn_payload, "player_turn", game->player_turn);
+        send_to_all_players(game, MSG_TURN_ORDER_UPDATE, turn_payload, game->player_turn_order[game->player_turn]);
+
         if (safeSendMsg(conn_s, MSG_YOUR_TURN, NULL) < 0) {
             LOG_ERROR_TAG("Errore durante l'invio del messaggio di turno al giocatore %d", game->player_turn_order[game->player_turn]);
             game->player_turn_order[game->player_turn] = -1;
             cleanup_client_game(game_epoll_fd, conn_s, game->player_turn_order[game->player_turn]);
             continue; // Errore, impossibile inviare il messaggio
         }
-        
-        LOG_INFO_TAG("Ordine dei turni aggiornato per la partita %d", game->game_id);
+
+        LOG_INFO_TAG("È il turno del giocatore %d", game->player_turn_order[game->player_turn]);
         set_epoll_timer(&timer_info, 60); // Resetta il timer a 60 secondi per il prossimo turno
         break;
     }

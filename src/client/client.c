@@ -143,12 +143,11 @@ void menu(int conn_s){
         int choice, ret;
         if((ret = scanf("%d", &choice)) != 1) {
             if(ret == EOF) {
-                LOG_ERROR("Errore durante la lettura dell'input");
-                exit(EXIT_FAILURE);
+                eof_handler(conn_s);
             }
             LOG_ERROR("Input non valido");
+            continue;
         }
-        eof_handler(conn_s);
         fflush(stdin);
 
         switch(choice){

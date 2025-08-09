@@ -42,7 +42,7 @@ GameState *create_game_state(unsigned int game_id, const char *game_name) {
 
     game->player_turn_order = NULL;
     game->player_turn_order_count = 0;
-    game->player_turn = 0;
+    game->player_turn = -1;
 
     return game;
 }

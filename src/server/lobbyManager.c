@@ -229,18 +229,13 @@ void on_join_game_msg(int lobby_epoll_fd, unsigned int user_id, int client_s, Pa
         return; // Client non autenticato, già gestito in require_authentication
     }
 
-    char *game_id_str = getPayloadValue(payload, 0, "game_id");
-
-    if(game_id_str){
-        char *endptr;
-        unsigned long tmp = strtoul(game_id_str, &endptr, 10);
-        if (*endptr != '\0' || game_id_str[0] == '\0') {
-            // Errore di conversione
-            LOG_WARNING("ID della partita non valido: `%s`", game_id_str);
+    int game_id;
+    if(getPayloadIntValue(payload, 0, "game_id", &game_id) == 0){
+        if (game_id < 0) {
+            LOG_WARNING("ID della partita non valido: `%d`", game_id);
             on_malformed_msg(lobby_epoll_fd, user_id, client_s);
             goto cleanup;
         }
-        unsigned int game_id = (unsigned int)tmp;
 
         if(add_player_to_game(game_id, user_id) == 0){
             char *game_name = get_game_name_by_id(game_id);
@@ -263,14 +258,13 @@ void on_join_game_msg(int lobby_epoll_fd, unsigned int user_id, int client_s, Pa
             }
         }
     } else {
-        LOG_WARNING("ID della partita non fornito.\n");
+        LOG_WARNING("ID della partita non fornito o non valido.\n");
         on_malformed_msg(lobby_epoll_fd, user_id, client_s);
         goto cleanup;
     }
 
 cleanup:
     free(username);
-    free(game_id_str);
 }
 
 

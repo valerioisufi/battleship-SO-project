@@ -98,6 +98,11 @@ typedef enum {
     GAME_UI_SIGNAL_FLEET_DEPLOYED,
     GAME_UI_SIGNAL_START_GAME,
     GAME_UI_SIGNAL_ATTACK
+} GameUISignalType;
+
+typedef struct {
+    GameUISignalType type; // Tipo di segnale
+    void *data; // Dati associati al segnale (può essere NULL)
 } GameUISignal;
 
 extern GameScreen screen;

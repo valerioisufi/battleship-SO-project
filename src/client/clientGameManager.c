@@ -16,12 +16,10 @@
 
 UserInfo *user = NULL; // Informazioni sull'utente corrente
 int is_owner = 0; // Indica se l'utente è il proprietario della partita
+int local_player_turn_index = -1; // Index del turno del giocatore locale (utente di questo client)
 
 GameState *game = NULL;
 pthread_mutex_t game_state_mutex;
-
-AttackPosition attack_position = {-1, 0, 0}; // Posizione dell'attacco corrente
-pthread_mutex_t attack_position_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 FILE *client_log_file = NULL;
 char *log_file_path = NULL;
@@ -127,7 +125,7 @@ void handle_game_msg(int conn_s, unsigned int game_id, char *game_name) {
                 break;
             }
 
-            switch (signal) {
+            switch (signal.type) {
                 case GAME_UI_SIGNAL_FLEET_DEPLOYED:{
                     // Invia un messaggio al server per notificare che la flotta è stata piazzata
                     Payload *payload = createEmptyPayload();
@@ -157,24 +155,32 @@ void handle_game_msg(int conn_s, unsigned int game_id, char *game_name) {
                     break;
                 }
                 case GAME_UI_SIGNAL_ATTACK:{
-                    if(game->player_turn == 0){
+                    pthread_mutex_lock(&game_state_mutex);
+                    log_game_message("Ricevuto segnale di attacco dall'interfaccia di gioco");
+                    log_game_message("%d %d", game->player_turn_order[game->player_turn], (int)user->user_id);
+                    if(game->player_turn == local_player_turn_index) {
+                        AttackPosition *attack_position = (AttackPosition *)signal.data;
+
                         Payload *attack_payload = createEmptyPayload();
-                        addPayloadKeyValuePairInt(attack_payload, "player_id", attack_position.player_id);
-                        addPayloadKeyValuePairInt(attack_payload, "x", attack_position.x);
-                        addPayloadKeyValuePairInt(attack_payload, "y", attack_position.y);
-                        pthread_mutex_unlock(&attack_position_mutex);
+                        addPayloadKeyValuePairInt(attack_payload, "player_id", attack_position->player_id);
+                        addPayloadKeyValuePairInt(attack_payload, "x", attack_position->x);
+                        addPayloadKeyValuePairInt(attack_payload, "y", attack_position->y);
+
+                        free(signal.data);
+
+                        log_game_message("Attacco in corso contro il giocatore %d alla posizione (%d, %d)", attack_position->player_id, attack_position->x, attack_position->y);
 
                         if (safeSendMsg(conn_s, MSG_ATTACK, attack_payload) < 0) {
                             LOG_ERROR_FILE(client_log_file, "Errore durante l'invio del messaggio MSG_PLAYER_ACTION al server");
-                            goto close_game;
                         }
                     } else {
                         LOG_WARNING_FILE(client_log_file, "Non è il turno del giocatore, ignorando l'attacco");
                     }
+                    pthread_mutex_unlock(&game_state_mutex);
                     break;
                 }
                 default:
-                    LOG_WARNING_FILE(client_log_file, "Segnale non gestito: %d", signal);
+                    LOG_WARNING_FILE(client_log_file, "Segnale non gestito: %d", signal.type);
                     break;
 
             }
@@ -205,7 +211,7 @@ void handle_game_msg(int conn_s, unsigned int game_id, char *game_name) {
                     break;
                 }
                 case MSG_GAME_STARTED: {
-                    on_game_started_msg();
+                    on_game_started_msg(payload);
                     break;
                 }
                 case MSG_TURN_ORDER_UPDATE: {
@@ -218,6 +224,10 @@ void handle_game_msg(int conn_s, unsigned int game_id, char *game_name) {
                 }
                 case MSG_ATTACK_UPDATE: {
                     on_attack_update_msg(payload);
+                    break;
+                }
+                case MSG_GAME_FINISHED: {
+                    on_game_finished_msg(payload);
                     break;
                 }
                 default:
@@ -264,10 +274,11 @@ void on_game_state_update_msg(Payload *payload) {
                 free(key);
                 continue;
             }
-            log_game_message("Giocatore %d (`%s`) si è unito alla partita %d", player_id, username, game->game_id);
             pthread_mutex_lock(&game_state_mutex);
+            int game_id_local = game->game_id;
             add_player_to_game_state(game, player_id, username);
             pthread_mutex_unlock(&game_state_mutex);
+            log_game_message("Giocatore %d (`%s`) si è unito alla partita %d", player_id, username, game_id_local);
 
             free(username);
         }
@@ -289,10 +300,11 @@ void on_player_joined_msg(Payload *payload){
         return;
     }
 
-    log_game_message("Giocatore %d (`%s`) si è unito alla partita %d", player_id, username, game->game_id);
     pthread_mutex_lock(&game_state_mutex);
+    int game_id_local = game->game_id;
     add_player_to_game_state(game, player_id, username);
     pthread_mutex_unlock(&game_state_mutex);
+    log_game_message("Giocatore %d (`%s`) si è unito alla partita %d", player_id, username, game_id_local);
 
     free(username);
 
@@ -305,30 +317,26 @@ void on_player_left_msg(Payload *payload) {
         LOG_ERROR_FILE(client_log_file, "ID del giocatore non trovato nel payload");
         return;
     }
+
+    pthread_mutex_lock(&game_state_mutex);
     PlayerState *player_state = get_player_state(game, player_id);
     if (player_state == NULL) {
         LOG_ERROR_FILE(client_log_file, "Stato del giocatore non trovato");
+        pthread_mutex_unlock(&game_state_mutex);
         return;
     }
-
-    log_game_message("Il giocatore %d (`%s`) ha lasciato la partita %d", player_id, player_state->user.username, game->game_id);
-    pthread_mutex_lock(&game_state_mutex);\
+    int game_id_local = game->game_id;
+    char *username_local = player_state->user.username ? strdup(player_state->user.username) : NULL;
     remove_player_from_game_state(game, player_id);
     pthread_mutex_unlock(&game_state_mutex);
+    log_game_message("Il giocatore %d (`%s`) ha lasciato la partita %d", player_id, username_local ? username_local : "Unknown", game_id_local);
+    free(username_local);
     
 }
 
-void on_game_started_msg(){
+void on_game_started_msg(Payload *payload) {
     LOG_DEBUG_FILE(client_log_file, "Ricevuto MSG_GAME_STARTED");
-    log_game_message("La partita `%s` con ID %d è iniziata!", game->game_name, game->game_id);
-    pthread_mutex_lock(&screen.mutex);
-    screen.game_screen_state = GAME_SCREEN_STATE_PLAYING;
-    screen.cursor.show = 1;
-    pthread_mutex_unlock(&screen.mutex);
-    refresh_screen();
-}
 
-void on_turn_order_update_msg(Payload *payload){
     int payload_size = getPayloadListSize(payload);
     if (payload_size <= 0) {
         LOG_ERROR_FILE(client_log_file, "Nessun giocatore trovato nell'ordine dei turni");
@@ -351,25 +359,53 @@ void on_turn_order_update_msg(Payload *payload){
             continue;
         }
         game->player_turn_order[i] = player_id;
+        if (player_id == (int)user->user_id) {
+            local_player_turn_index = i;
+        }
     }
 
+    char *game_name_local = game->game_name ? strdup(game->game_name) : NULL;
+    int game_id_local = game->game_id;
     pthread_mutex_unlock(&game_state_mutex);
+    log_game_message("La partita `%s` con ID %d è iniziata!", game_name_local ? game_name_local : "?", game_id_local);
+    free(game_name_local);
 
-    log_game_message("Ordine dei turni aggiornato: ");
-    for (int i = 0; i < payload_size; i++) {
-        log_game_message("Giocatore %d", game->player_turn_order[i]);
+    pthread_mutex_lock(&screen.mutex);
+    screen.game_screen_state = GAME_SCREEN_STATE_PLAYING;
+    screen.cursor.show = 1;
+    pthread_mutex_unlock(&screen.mutex);
+
+    refresh_screen();
+}
+
+void on_turn_order_update_msg(Payload *payload){
+    LOG_DEBUG_FILE(client_log_file, "Ricevuto MSG_TURN_ORDER_UPDATE");
+
+    int player_turn;
+    if (getPayloadIntValue(payload, 0, "player_turn", &player_turn) < 0) {
+        LOG_ERROR_FILE(client_log_file, "Turno del giocatore non trovato nel payload");
+        return;
     }
-
+    
+    pthread_mutex_lock(&game_state_mutex);
+    game->player_turn = player_turn;
+    int current_player_id = game->player_turn_order[player_turn];
+    pthread_mutex_unlock(&game_state_mutex);
+    log_game_message("È il turno del giocatore %d", current_player_id);
 }
 
 void on_your_turn_msg(){
+    LOG_DEBUG_FILE(client_log_file, "Ricevuto MSG_YOUR_TURN");
+
     log_game_message("È il tuo turno di giocare! Effettua la tua mossa...");
     pthread_mutex_lock(&game_state_mutex);
-    game->player_turn = 1; // Imposta il turno del giocatore corrente a 1 = tu
+    game->player_turn = local_player_turn_index; // Imposta il turno del giocatore corrente a local_player_turn_index
     pthread_mutex_unlock(&game_state_mutex);
 }
 
 void on_attack_update_msg(Payload *payload) {
+    LOG_DEBUG_FILE(client_log_file, "Ricevuto MSG_ATTACK_UPDATE");
+
     int attacker_id, attacked_id, x, y;
     if (getPayloadIntValue(payload, 0, "attacker_id", &attacker_id) < 0 ||
         getPayloadIntValue(payload, 0, "attacked_id", &attacked_id) < 0 ||
@@ -393,24 +429,46 @@ void on_attack_update_msg(Payload *payload) {
         return;
     }
     GameBoard *attacked_board = &attacked_state->board;
-
-
+    int log_case = 0; // 1=hit,2=miss,3=sunk,0=unknown
     if(strcmp(result, "hit") == 0) {
-        log_game_message("Il giocatore %d ha colpito la posizione (%d, %d)", attacker_id, x, y);
         set_cell(attacked_board, x, y, 'X'); // Colpito
+        log_case = 1;
     } else if (strcmp(result, "miss") == 0) {
-        log_game_message("Il giocatore %d ha mancato la posizione (%d, %d)", attacker_id, x, y);
         set_cell(attacked_board, x, y, '*'); // Mancato
+        log_case = 2;
     } else if (strcmp(result, "sunk") == 0) {
-        log_game_message("Il giocatore %d ha affondato una nave alla posizione (%d, %d)", attacker_id, x, y);
         set_cell(attacked_board, x, y, 'X'); // Colpito
         attacked_board->ships_left--; // Decrementa le navi rimaste
+        log_case = 3;
     } else {
         LOG_ERROR_FILE(client_log_file, "Risultato dell'attacco non riconosciuto: %s", result);
     }
-
     pthread_mutex_unlock(&game_state_mutex);
 
+    if (log_case == 1) {
+        log_game_message("Il giocatore %d ha colpito la posizione (%d, %d)", attacker_id, x, y);
+    } else if (log_case == 2) {
+        log_game_message("Il giocatore %d ha mancato la posizione (%d, %d)", attacker_id, x, y);
+    } else if (log_case == 3) {
+        log_game_message("Il giocatore %d ha affondato una nave alla posizione (%d, %d)", attacker_id, x, y);
+    }
+
+}
+
+void on_game_finished_msg(Payload *payload) {
+    LOG_DEBUG_FILE(client_log_file, "Ricevuto MSG_GAME_FINISHED");
+
+    int winner_id;
+    if (getPayloadIntValue(payload, 0, "winner_id", &winner_id) < 0) {
+        LOG_ERROR_FILE(client_log_file, "ID del vincitore non trovato nel payload");
+        return;
+    }
+
+    if(winner_id == (int)user->user_id) {
+        log_game_message("La partita è finita! Hai vinto!");
+    } else {
+        log_game_message("La partita è finita! Il vincitore è il giocatore %d", winner_id);
+    }
 }
 
 

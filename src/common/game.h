@@ -52,7 +52,7 @@ typedef struct {
     unsigned int players_capacity; // Capacità attuale dell'array dei giocatori
 
     int *player_turn_order; // Array di ID dei giocatori in ordine di turno, NULL se non impostato
-    unsigned int player_turn; // Index del giocatore  in `player_turn_order` il cui turno è attivo
+    int player_turn; // Index del giocatore  in `player_turn_order` il cui turno è attivo
     unsigned int player_turn_order_count; // Numero di giocatori in `player_turn_order`
 } GameState;
 
