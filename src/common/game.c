@@ -86,9 +86,9 @@ int add_player_to_game_state(GameState *game, int player_id, char *username) {
         return -1;
     }
     game->players[game->players_count].fleet = NULL;
+    init_board(&game->players[game->players_count].board); // Inizializza la griglia di gioco del nuovo giocatore
     game->players_count++;
-
-    init_board(&game->players[game->players_count - 1].board); // Inizializza la griglia di gioco del nuovo giocatore
+    
     return 0;
 }
 
@@ -233,6 +233,7 @@ int place_ship(GameBoard *board, ShipPlacement *ship) {
     if (board == NULL || ship == NULL) {
         return -1;
     }
+    LOG_DEBUG("Placing ship at (%d, %d) with size %d, vertical: %d", ship->x, ship->y, ship->dim, ship->vertical);
     if (board->ships_left >= NUM_SHIPS) {
         return -1; // Non è possibile posizionare più navi
     }
@@ -250,6 +251,7 @@ int place_ship(GameBoard *board, ShipPlacement *ship) {
             board->grid[ship->x + i][ship->y] = 'A' + ship->dim - 1; // Posiziona la nave
         }
     }
+    LOG_DEBUG("Ship placed successfully at (%d, %d) with size %d, vertical: %d", ship->x, ship->y, ship->dim, ship->vertical);
 
     board->ships_left++;
     return 0;
@@ -299,7 +301,7 @@ int attack(PlayerState *player_state, int x, int y) {
                     int hit = 0;
                     for (int j = 0; j < ship->dim; j++) {
                         if (board->grid[ship->x + j][ship->y] == 'X') {
-                            hit = 1;
+                            hit++;
                         }
                     }
                     if(hit == ship->dim){
@@ -314,7 +316,6 @@ int attack(PlayerState *player_state, int x, int y) {
             }
 
         }
-        board->ships_left--; // Decrementa il numero di navi rimaste
         return 1; // Colpito con successo
     } else if (cell == '.') {
         board->grid[x][y] = '*'; // Mancato

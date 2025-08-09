@@ -187,7 +187,12 @@ void on_ready_to_play_msg(int game_epoll_fd, int client_s, unsigned int player_i
         addPayloadKeyValuePair(gameStatePayload, "type", "player_info");
 
         addPayloadKeyValuePairInt(gameStatePayload, "player_id", current_game->players[i].user.user_id);
-        addPayloadKeyValuePair(gameStatePayload, "username", current_game->players[i].user.username);
+        if (current_game->players[i].user.username != NULL) {
+            addPayloadKeyValuePair(gameStatePayload, "username", current_game->players[i].user.username);
+        } else {
+            LOG_DEBUG("Username not found for player %d, using fallback", current_game->players[i].user.user_id);
+            addPayloadKeyValuePair(gameStatePayload, "username", "Unknown"); // Fallback
+        }
     }
 
     if (safeSendMsg(client_s, MSG_GAME_STATE_UPDATE, gameStatePayload) < 0) {
@@ -221,17 +226,24 @@ void on_setup_fleet_msg(int game_epoll_fd, int client_s, unsigned int player_id,
         return; // Il gioco non è in attesa di piazzamento navi
     }
 
-    if (current_game->players[player_id].fleet != NULL) {
+    PlayerState *player_state = get_player_state(current_game, player_id);
+    if (player_state == NULL) {
+        LOG_ERROR_TAG("Stato del giocatore non trovato per l'ID %d", player_id);
+        return;
+    }
+
+    if (player_state->fleet != NULL) {
         LOG_WARNING_TAG("Il giocatore %d ha già inviato la configurazione della flotta, ignorando il nuovo messaggio", player_id);
         on_unexpected_game_msg(game_epoll_fd, client_s, player_id, MSG_SETUP_FLEET);
         return;
     }
-    current_game->players[player_id].fleet = malloc(sizeof(FleetSetup));
-    if (current_game->players[player_id].fleet == NULL) {
+    player_state->fleet = malloc(sizeof(FleetSetup));
+    if (player_state->fleet == NULL) {
         LOG_ERROR_TAG("Errore durante l'allocazione della flotta per il giocatore %d", player_id);
         return;
     }
-    memset(current_game->players[player_id].fleet, 0, sizeof(FleetSetup));
+    memset(player_state->fleet, 0, sizeof(FleetSetup));
+    // init_board(&player_state->board);
 
     int is_fleet_valid = 1;
     for(int i = 0; i < getPayloadListSize(payload); i++) {
@@ -244,28 +256,28 @@ void on_setup_fleet_msg(int game_epoll_fd, int client_s, unsigned int player_id,
             continue; // Continua con il prossimo elemento del payload
         }
 
-        current_game->players[player_id].fleet->ships[i].dim = dim;
-        current_game->players[player_id].fleet->ships[i].vertical = vertical;
-        current_game->players[player_id].fleet->ships[i].x = x;
-        current_game->players[player_id].fleet->ships[i].y = y;
+        player_state->fleet->ships[i].dim = dim;
+        player_state->fleet->ships[i].vertical = vertical;
+        player_state->fleet->ships[i].x = x;
+        player_state->fleet->ships[i].y = y;
 
         LOG_DEBUG_TAG("Nave %d per il giocatore %d: dim=%d, vertical=%d, x=%d, y=%d", i, player_id, dim, vertical, x, y);
 
-        if(place_ship(&current_game->players[player_id].board, &current_game->players[player_id].fleet->ships[i])){
+        if(place_ship(&player_state->board, &player_state->fleet->ships[i])){
             LOG_ERROR_TAG("Errore durante il piazzamento della nave %d per il giocatore %d", i, player_id);
             is_fleet_valid = 0;
             // break; // Esci dal ciclo se il piazzamento fallisce
         }
     }
 
-    if (current_game->players[player_id].board.ships_left != NUM_SHIPS) {
+    if (player_state->board.ships_left != NUM_SHIPS) {
         LOG_WARNING_TAG("Il giocatore %d ha inviato una flotta incompleta, ignorando la richiesta", player_id);
         is_fleet_valid = 0;
     }
 
     int dim5 = 0, dim4 = 0, dim3 = 0, dim2 = 0;
     for (int i = 0; i < NUM_SHIPS; i++) {
-        int dim = current_game->players[player_id].fleet->ships[i].dim;
+        int dim = player_state->fleet->ships[i].dim;
         if (dim == 5) dim5++;
         else if (dim == 4) dim4++;
         else if (dim == 3) dim3++;
@@ -297,9 +309,9 @@ void on_setup_fleet_msg(int game_epoll_fd, int client_s, unsigned int player_id,
         }
     } else {
         LOG_WARNING_TAG("La flotta del giocatore %d non è valida", player_id);
-        init_board(&current_game->players[player_id].board);
-        free(current_game->players[player_id].fleet);
-        current_game->players[player_id].fleet = NULL;
+        init_board(&player_state->board);
+        free(player_state->fleet);
+        player_state->fleet = NULL;
 
         on_error_player_action_msg(game_epoll_fd, client_s, player_id);
     }
@@ -397,16 +409,18 @@ void on_attack_msg(int game_epoll_fd, int client_s, unsigned int player_id, Payl
         addPayloadKeyValuePairInt(attack_payload, "attacked_id", attacked_player_id);
         addPayloadKeyValuePairInt(attack_payload, "x", x);
         addPayloadKeyValuePairInt(attack_payload, "y", y);
+        LOG_DEBUG_TAG("Il giocatore %d ha attaccato la posizione (%d, %d) - player %d", player_id, x, y, attacked_player_id);
         if(ret == 0) {
             LOG_DEBUG_TAG("Il giocatore %d ha mancato l'attacco alla posizione (%d, %d) - player %d", player_id, x, y, attacked_player_id);
             addPayloadKeyValuePair(attack_payload, "result", "miss");
         } else if(ret == 1) {
             LOG_DEBUG_TAG("Il giocatore %d ha colpito una nave alla posizione (%d, %d) - player %d", player_id, x, y, attacked_player_id);
             addPayloadKeyValuePair(attack_payload, "result", "hit");
-        } else if(ret > 2) {
+        } else if(ret >= 2) {
             LOG_DEBUG_TAG("Il giocatore %d ha affondato una nave alla posizione (%d, %d) - player %d", player_id, x, y, attacked_player_id);
             addPayloadKeyValuePair(attack_payload, "result", "sunk");
         }
+        LOG_DEBUG_TAG("ret: %d", ret);
 
         send_to_all_players(current_game, MSG_ATTACK_UPDATE, attack_payload, -1);
 
@@ -434,8 +448,8 @@ void on_attack_msg(int game_epoll_fd, int client_s, unsigned int player_id, Payl
                     int client_fd = get_user_socket_fd(current_game->players[i].user.user_id);
                     cleanup_client_game(game_epoll_fd, client_fd, current_game->players[i].user.user_id);
                 }
+                return;
             }
-            return;
         }
 
         update_turn_order(current_game, game_epoll_fd);

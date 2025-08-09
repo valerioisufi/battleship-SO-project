@@ -112,6 +112,7 @@ void init_game_log();
 void log_game_message(char *fmt, ...);
 void print_game_log();
 
+void refresh_board();
 void refresh_screen();
 
 void *game_ui_thread(void *arg);

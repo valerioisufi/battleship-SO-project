@@ -133,6 +133,16 @@ void on_login_msg(int lobby_epoll_fd, unsigned int user_id, int client_s, Payloa
     char *username = getPayloadValue(payload, 0, "username");
 
     if (username) {
+        int username_len = strlen(username);
+        if(username_len > 16) {
+            LOG_WARNING("Nome utente troppo lungo, troncamento a 16 caratteri");
+            username[16] = '\0';
+        }
+        if(username_len == 0) {
+            LOG_ERROR("Nome utente vuoto, procedo ad assegnarne uno di default");
+            free(username);
+            asprintf(&username, "guest_%d", user_id);
+        }
         LOG_INFO("Utente `%s` si è connesso", username);
 
         if(update_user_username(user_id, username) < 0){
@@ -180,6 +190,16 @@ void on_create_game_msg(int lobby_epoll_fd, unsigned int user_id, int client_s, 
     char *game_name = getPayloadValue(payload, 0, "game_name");
 
     if(game_name){
+        int game_name_len = strlen(game_name);
+        if(game_name_len > 32) {
+            LOG_WARNING("Nome della partita troppo lungo, troncamento a 32 caratteri");
+            game_name[32] = '\0';
+        }
+        if(game_name_len == 0) {
+            LOG_ERROR("Nome della partita vuoto, procedo ad assegnarne uno di default");
+            free(game_name);
+            asprintf(&game_name, "Game_%d", user_id);
+        }
         int game_id = create_game(game_name, user_id);
 
         if(game_id < 0){
@@ -191,11 +211,10 @@ void on_create_game_msg(int lobby_epoll_fd, unsigned int user_id, int client_s, 
             }
         } else {
             LOG_INFO("Partita '%s' creata con ID %d da `%s`", game_name, game_id, username);
-            char buffer[32];
-            snprintf(buffer, sizeof(buffer), "%d", game_id);
 
             Payload *payload = createEmptyPayload();
-            addPayloadKeyValuePair(payload, "game_id", buffer);
+            addPayloadKeyValuePairInt(payload, "game_id", game_id);
+            addPayloadKeyValuePair(payload, "game_name", game_name);
 
             if(safeSendMsg(client_s, MSG_GAME_CREATED, payload) < 0){
                 LOG_MSG_ERROR("Errore durante l'invio del messaggio di partita creata al client `%s`", username);

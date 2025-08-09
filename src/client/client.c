@@ -72,8 +72,8 @@ int main(int argc, char *argv[]){
 
 
     // richiedo il nome dell'utente
-    printf("Inserire un nome utente (max 30 caratteri): ");
-    char *username = readAlfanumericString(30);
+    printf("Inserire un nome utente (max 16 caratteri): ");
+    char *username = readAlfanumericString(16);
     if(username == NULL){
         LOG_ERROR("Errore durante la lettura del nome utente");
         exit(EXIT_FAILURE);
@@ -83,6 +83,7 @@ int main(int argc, char *argv[]){
     // effettuo il login (MSG_LOGIN)
     Payload *loginPayload = createEmptyPayload();
     addPayloadKeyValuePair(loginPayload, "username", username); // Client type C for client
+    free(username);
 
     if(safeSendMsg(conn_s, MSG_LOGIN, loginPayload) < 0){
         LOG_ERROR("Errore durante l'invio del messaggio di login al server");
@@ -101,14 +102,20 @@ int main(int argc, char *argv[]){
     switch(msg_type){
         case MSG_WELCOME:
             user = malloc(sizeof(UserInfo));
-            user->username = strdup(username); // Salvo il nome utente per l'uso futuro
-            if(getPayloadIntValue(payload, 0, "user_id", (int *)&user->user_id)){
-                LOG_ERROR("ID dell'utente non trovato nel payload");
-                free(username);
+            if (!user) {
+                LOG_ERROR("Errore durante l'allocazione della memoria per l'utente");
                 freePayload(payload);
                 exit(EXIT_FAILURE);
             }
-            free(username); // Libero la memoria del nome utente
+            user->username = getPayloadValue(payload, 0, "username");
+            if(user->username == NULL) {
+                LOG_ERROR("Nome utente non trovato nel payload");
+                exit(EXIT_FAILURE);
+            }
+            if(getPayloadIntValue(payload, 0, "user_id", (int *)&user->user_id)){
+                LOG_ERROR("ID dell'utente non trovato nel payload");
+                exit(EXIT_FAILURE);
+            }
             freePayload(payload);
 
             printf("Benvenuto nel gioco %s!\n", user->username);
@@ -159,7 +166,7 @@ void menu(int conn_s){
             case 1:
                 printf("Iniziando una nuova partita...\n");
                 printf("Inserisci il nome della partita: ");
-                char *game_name = readAlfanumericString(30);
+                char *game_name = readAlfanumericString(32);
                 if(game_name == NULL){
                     LOG_ERROR("Errore durante la lettura del nome della partita");
                     exit(EXIT_FAILURE);
@@ -167,6 +174,8 @@ void menu(int conn_s){
 
                 Payload *createGamePayload = createEmptyPayload();
                 addPayloadKeyValuePair(createGamePayload, "game_name", game_name);
+                free(game_name);
+
                 if(safeSendMsg(conn_s, MSG_CREATE_GAME, createGamePayload) < 0){
                     LOG_ERROR("Errore durante l'invio del messaggio di creazione della partita al server");
                     exit(EXIT_FAILURE);
@@ -177,6 +186,11 @@ void menu(int conn_s){
                     exit(EXIT_FAILURE);
                 }
                 if(msg_type == MSG_GAME_CREATED){
+                    char *game_name = getPayloadValue(payload, 0, "game_name");
+                    if(game_name == NULL){
+                        LOG_ERROR("Nome della partita non trovato nel payload");
+                        exit(EXIT_FAILURE);
+                    }
                     int game_id;
                     if(getPayloadIntValue(payload, 0, "game_id", &game_id) != -1){
                         printf("Partita creata con successo! ID: %d\n", game_id);
@@ -184,6 +198,7 @@ void menu(int conn_s){
                         handle_game_msg(conn_s, game_id, game_name);
                     } else {
                         LOG_ERROR("ID della partita non trovato nel payload o non valido");
+                        exit(EXIT_FAILURE);
                     }
 
                 } else if(msg_type == MSG_ERROR_CREATE_GAME){
@@ -191,7 +206,6 @@ void menu(int conn_s){
                 } else {
                     LOG_WARNING("Messaggio non riconosciuto: %d", msg_type);
                 }
-                free(game_name);
                 freePayload(payload);
 
                 break;

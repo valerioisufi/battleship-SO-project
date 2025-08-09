@@ -447,11 +447,26 @@ void on_attack_update_msg(Payload *payload) {
     } else if (strcmp(result, "sunk") == 0) {
         set_cell(attacked_board, x, y, 'X'); // Colpito
         attacked_board->ships_left--; // Decrementa le navi rimaste
+        if(attacked_board->ships_left == 0) {
+            log_case = 4;
+            for(unsigned int i = 0; i < game->player_turn_order_count; i++) {
+                if(game->player_turn_order[i] == (int)attacked_id) {
+                    game->player_turn_order[i] = -1; // Rimuove il giocatore dall'ordine dei turni
+                    break;
+                }
+            }
+        }
         log_case = 3;
     } else {
         LOG_ERROR_FILE(client_log_file, "Risultato dell'attacco non riconosciuto: %s", result);
     }
     pthread_mutex_unlock(&game_state_mutex);
+
+    pthread_mutex_lock(&screen.mutex);
+    pthread_mutex_lock(&game_state_mutex);
+    refresh_board();
+    pthread_mutex_unlock(&game_state_mutex);
+    pthread_mutex_unlock(&screen.mutex);
 
     if (log_case == 1) {
         log_game_message("Il giocatore %d ha colpito la posizione (%d, %d)", attacker_id, x, y);
@@ -459,6 +474,8 @@ void on_attack_update_msg(Payload *payload) {
         log_game_message("Il giocatore %d ha mancato la posizione (%d, %d)", attacker_id, x, y);
     } else if (log_case == 3) {
         log_game_message("Il giocatore %d ha affondato una nave alla posizione (%d, %d)", attacker_id, x, y);
+    } else if (log_case == 4) {
+        log_game_message("Il giocatore %d ha perso tutte le sue navi", attacked_id);
     }
 
     free(result);
