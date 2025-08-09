@@ -282,11 +282,14 @@ int attack(PlayerState *player_state, int x, int y) {
                     int hit = 0;
                     for (int j = 0; j < ship->dim; j++) {
                         if (board->grid[ship->x][ship->y + j] == 'X') {
-                            hit = 1;
+                            hit++;
                         }
                     }
                     if(hit == ship->dim){
                         board->ships_left--; // Se tutte le celle della nave sono colpite, decrementa il numero di navi rimaste
+                        if(board->ships_left == 0){
+                            return 3; // Giocatore eliminato
+                        }
                         return 2; // Colpito con successo e nave affondata
                     }
                     break;

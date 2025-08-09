@@ -156,25 +156,19 @@ void handle_game_msg(int conn_s, unsigned int game_id, char *game_name) {
                 }
                 case GAME_UI_SIGNAL_ATTACK:{
                     pthread_mutex_lock(&game_state_mutex);
-                    log_game_message("Ricevuto segnale di attacco dall'interfaccia di gioco");
-                    log_game_message("%d %d", game->player_turn_order[game->player_turn], (int)user->user_id);
-                    if(game->player_turn == local_player_turn_index) {
-                        AttackPosition *attack_position = (AttackPosition *)signal.data;
+                    AttackPosition *attack_position = (AttackPosition *)signal.data;
 
-                        Payload *attack_payload = createEmptyPayload();
-                        addPayloadKeyValuePairInt(attack_payload, "player_id", attack_position->player_id);
-                        addPayloadKeyValuePairInt(attack_payload, "x", attack_position->x);
-                        addPayloadKeyValuePairInt(attack_payload, "y", attack_position->y);
+                    Payload *attack_payload = createEmptyPayload();
+                    addPayloadKeyValuePairInt(attack_payload, "player_id", attack_position->player_id);
+                    addPayloadKeyValuePairInt(attack_payload, "x", attack_position->x);
+                    addPayloadKeyValuePairInt(attack_payload, "y", attack_position->y);
 
-                        free(signal.data);
+                    log_game_message("Attacco in corso contro il giocatore %d alla posizione (%d, %d)", attack_position->player_id, attack_position->x, attack_position->y);
+                    
+                    free(attack_position);
 
-                        log_game_message("Attacco in corso contro il giocatore %d alla posizione (%d, %d)", attack_position->player_id, attack_position->x, attack_position->y);
-
-                        if (safeSendMsg(conn_s, MSG_ATTACK, attack_payload) < 0) {
-                            LOG_ERROR_FILE(client_log_file, "Errore durante l'invio del messaggio MSG_PLAYER_ACTION al server");
-                        }
-                    } else {
-                        LOG_WARNING_FILE(client_log_file, "Non è il turno del giocatore, ignorando l'attacco");
+                    if (safeSendMsg(conn_s, MSG_ATTACK, attack_payload) < 0) {
+                        LOG_ERROR_FILE(client_log_file, "Errore durante l'invio del messaggio MSG_PLAYER_ACTION al server");
                     }
                     pthread_mutex_unlock(&game_state_mutex);
                     break;
@@ -319,6 +313,14 @@ void on_player_left_msg(Payload *payload) {
     }
 
     pthread_mutex_lock(&game_state_mutex);
+    for(unsigned int i = 0; i < game->player_turn_order_count; i++) {
+        if(game->player_turn_order[i] == (int)player_id) {
+            game->player_turn_order[i] = -1; // Rimuove il giocatore dall'ordine dei turni
+            LOG_DEBUG_FILE(client_log_file, "Il giocatore %d è stato rimosso dall'ordine dei turni", player_id);
+            break;
+        }
+    }
+
     PlayerState *player_state = get_player_state(game, player_id);
     if (player_state == NULL) {
         LOG_ERROR_FILE(client_log_file, "Stato del giocatore non trovato");
@@ -372,6 +374,12 @@ void on_game_started_msg(Payload *payload) {
 
     pthread_mutex_lock(&screen.mutex);
     screen.game_screen_state = GAME_SCREEN_STATE_PLAYING;
+    screen.current_showed_player = 0;
+    pthread_mutex_lock(&game_state_mutex);
+    do{
+        screen.current_showed_player = (screen.current_showed_player + 1) % game->player_turn_order_count;
+    } while(game->player_turn_order[screen.current_showed_player] == -1 || (int)screen.current_showed_player == local_player_turn_index);
+    pthread_mutex_unlock(&game_state_mutex);
     screen.cursor.show = 1;
     pthread_mutex_unlock(&screen.mutex);
 
@@ -453,6 +461,8 @@ void on_attack_update_msg(Payload *payload) {
         log_game_message("Il giocatore %d ha affondato una nave alla posizione (%d, %d)", attacker_id, x, y);
     }
 
+    free(result);
+
 }
 
 void on_game_finished_msg(Payload *payload) {
@@ -464,11 +474,18 @@ void on_game_finished_msg(Payload *payload) {
         return;
     }
 
+    pthread_mutex_lock(&screen.mutex);
+    screen.game_screen_state = GAME_SCREEN_STATE_FINISHED;
+    pthread_mutex_unlock(&screen.mutex);
+
     if(winner_id == (int)user->user_id) {
         log_game_message("La partita è finita! Hai vinto!");
     } else {
         log_game_message("La partita è finita! Il vincitore è il giocatore %d", winner_id);
     }
+
+    sleep(15);
+
 }
 
 

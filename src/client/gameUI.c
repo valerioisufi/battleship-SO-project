@@ -477,8 +477,11 @@ void *game_ui_thread(void *arg) {
                                 screen.cursor.show = 0; // Nascondi il cursore
                                 pthread_mutex_unlock(&screen.mutex);
 
-                                log_game_message("Tutte le navi sono state piazzate. Inizia il gioco!");
-                                GameUISignal sig = {GAME_UI_SIGNAL_FLEET_DEPLOYED, NULL};
+                                log_game_message("Tutte le navi sono state piazzate. In attesa dell'inizio del gioco!");
+                                GameUISignal sig;
+                                memset(&sig, 0, sizeof(sig));
+                                sig.type = GAME_UI_SIGNAL_FLEET_DEPLOYED;
+                                sig.data = NULL;
                                 write(pipe_fd_write, &sig, sizeof(GameUISignal));
                             } else {
                                 if (ship_placed < NUM_SHIPS) {
@@ -509,25 +512,39 @@ void *game_ui_thread(void *arg) {
                     } else if( screen.game_screen_state == GAME_SCREEN_STATE_PLAYING) {
                         pthread_mutex_unlock(&screen.mutex);
                         if(game->player_turn == local_player_turn_index) {
-                            AttackPosition *attack_position = malloc(sizeof(AttackPosition));
                             pthread_mutex_lock(&game_state_mutex);
-                            attack_position->player_id = game->player_turn_order[screen.current_showed_player];
-                            pthread_mutex_unlock(&game_state_mutex);
-                            attack_position->x = screen.cursor.x;
-                            attack_position->y = screen.cursor.y;
+                            int player_id = game->player_turn_order[screen.current_showed_player];
+                            PlayerState *current_player = get_player_state(game, player_id);
+                            if(current_player->board.grid[screen.cursor.x][screen.cursor.y] == '.'){
+                                pthread_mutex_unlock(&game_state_mutex);
 
-                            GameUISignal sig = {GAME_UI_SIGNAL_ATTACK, attack_position};
-                            write(pipe_fd_write, &sig, sizeof(GameUISignal));
+                                AttackPosition *attack_position = malloc(sizeof(AttackPosition));
+                                attack_position->player_id = player_id;
+                                attack_position->x = screen.cursor.x;
+                                attack_position->y = screen.cursor.y;
 
-                            pthread_mutex_lock(&game_state_mutex);
-                            game->player_turn = -1; // Passa il turno
-                            pthread_mutex_unlock(&game_state_mutex);
+                                GameUISignal sig;
+                                memset(&sig, 0, sizeof(sig));
+                                sig.type = GAME_UI_SIGNAL_ATTACK;
+                                sig.data = attack_position;
+                                write(pipe_fd_write, &sig, sizeof(GameUISignal));
+
+                                pthread_mutex_lock(&game_state_mutex);
+                                game->player_turn = -1; // Passa il turno
+                                pthread_mutex_unlock(&game_state_mutex);
+                            } else {
+                                pthread_mutex_unlock(&game_state_mutex);
+                                log_game_message("Colpito una cella già attaccata. Scegli un'altra cella.");
+                            }
                         }
                     }
                     break;
                 case 'S':
                     if(is_owner && screen.game_screen_state == GAME_SCREEN_STATE_PLACING_SHIPS) {
-                        GameUISignal sig = {GAME_UI_SIGNAL_START_GAME, NULL};
+                        GameUISignal sig;
+                        memset(&sig, 0, sizeof(sig));
+                        sig.type = GAME_UI_SIGNAL_START_GAME;
+                        sig.data = NULL;
                         write(pipe_fd_write, &sig, sizeof(GameUISignal));
                     }
                     break;
@@ -538,7 +555,7 @@ void *game_ui_thread(void *arg) {
                         pthread_mutex_lock(&game_state_mutex);
                         do{
                             screen.current_showed_player = (screen.current_showed_player + game->player_turn_order_count - 1) % game->player_turn_order_count;
-                        } while(game->player_turn_order[screen.current_showed_player] == -1 || screen.current_showed_player == local_player_turn_index);
+                        } while(game->player_turn_order[screen.current_showed_player] == -1 || (int)screen.current_showed_player == local_player_turn_index);
                         refresh_board();
                         pthread_mutex_unlock(&game_state_mutex);
                     }
@@ -551,7 +568,7 @@ void *game_ui_thread(void *arg) {
                         pthread_mutex_lock(&game_state_mutex);
                         do{
                             screen.current_showed_player = (screen.current_showed_player + 1) % game->player_turn_order_count;
-                        } while(game->player_turn_order[screen.current_showed_player] == -1 || screen.current_showed_player == local_player_turn_index);
+                        } while(game->player_turn_order[screen.current_showed_player] == -1 || (int)screen.current_showed_player == local_player_turn_index);
                         refresh_board();
                         pthread_mutex_unlock(&game_state_mutex);
                     }

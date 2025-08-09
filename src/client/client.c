@@ -146,9 +146,14 @@ void menu(int conn_s){
                 eof_handler(conn_s);
             }
             LOG_ERROR("Input non valido");
+
+            int ch;
+            while ((ch = getchar()) != '\n' && ch != EOF);
             continue;
         }
-        fflush(stdin);
+
+        int ch;
+        while ((ch = getchar()) != '\n' && ch != EOF);
 
         switch(choice){
             case 1:

@@ -249,10 +249,12 @@ void on_setup_fleet_msg(int game_epoll_fd, int client_s, unsigned int player_id,
         current_game->players[player_id].fleet->ships[i].x = x;
         current_game->players[player_id].fleet->ships[i].y = y;
 
+        LOG_DEBUG_TAG("Nave %d per il giocatore %d: dim=%d, vertical=%d, x=%d, y=%d", i, player_id, dim, vertical, x, y);
+
         if(place_ship(&current_game->players[player_id].board, &current_game->players[player_id].fleet->ships[i])){
             LOG_ERROR_TAG("Errore durante il piazzamento della nave %d per il giocatore %d", i, player_id);
             is_fleet_valid = 0;
-            break; // Esci dal ciclo se il piazzamento fallisce
+            // break; // Esci dal ciclo se il piazzamento fallisce
         }
     }
 
@@ -602,6 +604,14 @@ void cleanup_client_game(int epoll_fd, int client_fd, unsigned int player_id) {
         epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
         close(client_fd);
     }
+
+    for(unsigned int i = 0; i < current_game->player_turn_order_count; i++) {
+        if(current_game->player_turn_order[i] == (int)player_id) {
+            current_game->player_turn_order[i] = -1; // Rimuove il giocatore dall'ordine dei turni
+            LOG_INFO_TAG("Il giocatore %d è stato rimosso dall'ordine dei turni", player_id);
+            break;
+        }
+    }
     remove_user(player_id); // Rimuove l'utente dalla lista degli utenti
     LOG_INFO_TAG("Utente %d disconnesso e rimosso", player_id);
 
@@ -609,7 +619,7 @@ void cleanup_client_game(int epoll_fd, int client_fd, unsigned int player_id) {
 
     if(current_game->players_count == 0) {
         // Se non ci sono più giocatori, distruggi lo stato del gioco
-        LOG_INFO_TAG("Non ci sono più giocatori nella partita, distruggendo lo stato del gioco");
+        LOG_INFO_TAG("Non ci sono più giocatori nella partita, procedo a eliminarla");
         remove_game(current_game->game_id); // Rimuovi la partita dallo stato del server
         LOG_INFO_TAG("Partita %d rimossa dallo stato del server", current_game->game_id);
 
