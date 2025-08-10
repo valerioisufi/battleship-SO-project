@@ -45,7 +45,7 @@ typedef struct {
 
 typedef struct {
     char *game_name; // Nome della partita (max 30 caratteri + terminatore), NULL se non impostato
-    unsigned int game_id; // ID della partita
+    int game_id; // ID della partita
 
     PlayerState *players; // Array di giocatori nella partita
     unsigned int players_count; // Numero attuale di giocatori nella partita
@@ -62,6 +62,7 @@ GameState *create_game_state(unsigned int game_id, const char *game_name);
 int add_player_to_game_state(GameState *game, int player_id, char *username);
 int remove_player_from_game_state(GameState *game, unsigned int player_id);
 PlayerState *get_player_state(GameState *game, unsigned int player_id);
+char *get_player_username(GameState *game, unsigned int player_id);
 void free_game_state(GameState *game);
 
 int init_board(GameBoard *board);

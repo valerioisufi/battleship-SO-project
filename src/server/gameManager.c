@@ -22,6 +22,7 @@
 __thread GameState *current_game = NULL;
 __thread GameStateType current_game_state_type = GAME_WAITING_FOR_PLAYERS;
 __thread TimerInfo timer_info = {0, -1};
+__thread int game_is_running = 1;
 
 /**
  * Thread di gioco che gestisce le interazioni tra i giocatori in una partita.
@@ -41,7 +42,7 @@ void *game_thread(void *arg) {
     free(game_arg->game_name);
     free(game_arg);
 
-    while (1) {
+    while (game_is_running) {
         struct epoll_event events[MAX_EVENTS];
         int nfds = epoll_wait(game_epoll_fd, events, MAX_EVENTS, get_epoll_timer(&timer_info) * 1000);
         if (nfds == 0){
@@ -160,6 +161,30 @@ void *game_thread(void *arg) {
         }
     }
 
+    LOG_INFO_TAG("Il thread del gioco sta terminando. Pulizia delle risorse...");
+    if(current_game->game_id != -1){
+        remove_game(current_game->game_id);
+    }
+
+    LOG_DEBUG_TAG("Disconnessione forzata dei %d giocatori rimanenti.", current_game->players_count);
+    for (unsigned int i = 0; i < current_game->players_count; i++) {
+        unsigned int player_id = current_game->players[i].user.user_id;
+        int client_fd = get_user_socket_fd(player_id);
+
+        if (client_fd != -1) {
+            epoll_ctl(game_epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
+            close(client_fd);
+        }
+        remove_user(player_id);
+        LOG_DEBUG_TAG("Pulizia finale per il giocatore %d completata.", player_id);
+    }
+
+    close(game_epoll_fd);
+    close(game_pipe_fd);
+
+    LOG_INFO_TAG("Thread di gioco terminato correttamente.");
+    free_game_state(current_game);
+
     return NULL;
 }
 
@@ -243,7 +268,6 @@ void on_setup_fleet_msg(int game_epoll_fd, int client_s, unsigned int player_id,
         return;
     }
     memset(player_state->fleet, 0, sizeof(FleetSetup));
-    // init_board(&player_state->board);
 
     int is_fleet_valid = 1;
     for(int i = 0; i < getPayloadListSize(payload); i++) {
@@ -380,9 +404,6 @@ void on_attack_msg(int game_epoll_fd, int client_s, unsigned int player_id, Payl
     }
 
     if (current_game->player_turn_order[current_game->player_turn] == (int)player_id) {
-        // Gestisci l'azione del giocatore
-        LOG_DEBUG_TAG("Il giocatore %d ha eseguito un attacco", player_id);
-
         int attacked_player_id, x, y;
         if(getPayloadIntValue(payload, 0, "player_id", &attacked_player_id) || getPayloadIntValue(payload, 0, "x", &x) || getPayloadIntValue(payload, 0, "y", &y)) {
             LOG_ERROR_TAG("Errore durante l'ottenimento delle coordinate dell'attacco dal payload");
@@ -409,47 +430,31 @@ void on_attack_msg(int game_epoll_fd, int client_s, unsigned int player_id, Payl
         addPayloadKeyValuePairInt(attack_payload, "attacked_id", attacked_player_id);
         addPayloadKeyValuePairInt(attack_payload, "x", x);
         addPayloadKeyValuePairInt(attack_payload, "y", y);
-        LOG_DEBUG_TAG("Il giocatore %d ha attaccato la posizione (%d, %d) - player %d", player_id, x, y, attacked_player_id);
         if(ret == 0) {
-            LOG_DEBUG_TAG("Il giocatore %d ha mancato l'attacco alla posizione (%d, %d) - player %d", player_id, x, y, attacked_player_id);
+            LOG_DEBUG_TAG("Il giocatore %d ha mancato l'attacco alla posizione %c%d - player %d", player_id, x + 'A', y + 1, attacked_player_id);
             addPayloadKeyValuePair(attack_payload, "result", "miss");
         } else if(ret == 1) {
-            LOG_DEBUG_TAG("Il giocatore %d ha colpito una nave alla posizione (%d, %d) - player %d", player_id, x, y, attacked_player_id);
+            LOG_DEBUG_TAG("Il giocatore %d ha colpito una nave alla posizione %c%d - player %d", player_id, x + 'A', y + 1, attacked_player_id);
             addPayloadKeyValuePair(attack_payload, "result", "hit");
         } else if(ret >= 2) {
-            LOG_DEBUG_TAG("Il giocatore %d ha affondato una nave alla posizione (%d, %d) - player %d", player_id, x, y, attacked_player_id);
+            LOG_DEBUG_TAG("Il giocatore %d ha affondato una nave alla posizione %c%d - player %d", player_id, x + 'A', y + 1, attacked_player_id);
             addPayloadKeyValuePair(attack_payload, "result", "sunk");
         }
-        LOG_DEBUG_TAG("ret: %d", ret);
 
         send_to_all_players(current_game, MSG_ATTACK_UPDATE, attack_payload, -1);
 
         if(ret == 3){
-            int exists_another_player = 0;
+            LOG_INFO_TAG("Tutte le navi del giocatore %d sono state affondate. Giocatore eliminato.", attacked_player_id);
+
             for(unsigned int i = 0; i < current_game->player_turn_order_count; i++){
                 if(current_game->player_turn_order[i] == attacked_player_id) {
                     current_game->player_turn_order[i] = -1; // Rimuove il giocatore attaccato dall'ordine dei turni
-                    LOG_INFO_TAG("Il giocatore %d è stato eliminato dalla partita", attacked_player_id);
-                }
-                if(current_game->player_turn_order[i] != -1 && current_game->player_turn_order[i] != (int)player_id) {
-                    exists_another_player = 1; // C'è almeno un altro giocatore nella partita
+                    break;
                 }
 
             }
 
-            if(!exists_another_player) {
-                LOG_INFO_TAG("Il giocatore %d ha vinto la partita", player_id);
-
-                Payload *payload = createEmptyPayload();
-                addPayloadKeyValuePairInt(payload, "winner_id", player_id);
-                send_to_all_players(current_game, MSG_GAME_FINISHED, payload, -1);
-
-                for(unsigned i = 0; i < current_game->players_count; i++) {
-                    int client_fd = get_user_socket_fd(current_game->players[i].user.user_id);
-                    cleanup_client_game(game_epoll_fd, client_fd, current_game->players[i].user.user_id);
-                }
-                return;
-            }
+            if (check_victory_conditions(game_epoll_fd)) return;
         }
 
         update_turn_order(current_game, game_epoll_fd);
@@ -542,7 +547,7 @@ void send_to_all_players(GameState *game, uint16_t msg_type, Payload *payload, i
  */
 void update_turn_order(GameState *game, int game_epoll_fd){
     if (game == NULL || game->players_count < 2 || current_game_state_type != GAME_IN_PROGRESS) {
-        LOG_ERROR_TAG("Stato del gioco non valido o nessun giocatore presente");
+        LOG_ERROR_TAG("Stato del gioco non valido o numero di giocatori insufficiente");
 
         if(game->players_count == 1 && current_game_state_type == GAME_IN_PROGRESS) {
             // Se c'è un solo giocatore, il gioco è finito e quel giocatore vince
@@ -560,6 +565,8 @@ void update_turn_order(GameState *game, int game_epoll_fd){
             int client_fd = get_user_socket_fd(current_game->players[i].user.user_id);
             cleanup_client_game(game_epoll_fd, client_fd, current_game->players[i].user.user_id);
         }
+
+        return;
     }
 
     if(game->player_turn_order == NULL){
@@ -605,6 +612,53 @@ void update_turn_order(GameState *game, int game_epoll_fd){
 
 }
 
+
+/**
+ * Controlla le condizioni di vittoria. Se un solo giocatore è rimasto, 
+ * dichiara la vittoria, invia il messaggio finale e imposta la flag per terminare il thread.
+ * @param game_epoll_fd File descriptor dell'epoll per la pulizia del client.
+ * @return Ritorna 1 se il gioco è terminato, altrimenti 0.
+ */
+int check_victory_conditions() {
+    int active_players_count = 0;
+    int winner_id = -1;
+
+    // Se il gioco non è ancora iniziato, non può esserci un vincitore.
+    if (current_game_state_type != GAME_IN_PROGRESS) {
+        return 0;
+    }
+
+    for(unsigned int i = 0; i < current_game->player_turn_order_count; i++){
+        // Un giocatore è considerato attivo se non è stato eliminato
+        if(current_game->player_turn_order[i] != -1) {
+            active_players_count++;
+            winner_id = current_game->player_turn_order[i];
+        }
+
+    }
+
+    if (active_players_count <= 1) {
+        LOG_INFO_TAG("Condizioni di vittoria raggiunte. Giocatori attivi: %d", active_players_count);
+
+        Payload *payload = createEmptyPayload();
+        if (winner_id != -1) {
+            LOG_INFO_TAG("Il giocatore %d ha vinto la partita!", winner_id);
+            addPayloadKeyValuePairInt(payload, "winner_id", winner_id);
+        } else {
+            LOG_INFO_TAG("La partita termina in pareggio o senza vincitori.");
+            addPayloadKeyValuePairInt(payload, "winner_id", -1); // Nessun vincitore
+        }
+        
+        send_to_all_players(current_game, MSG_GAME_FINISHED, payload, -1);
+        
+        // Imposta la flag per terminare il loop principale
+        game_is_running = 0;
+        return 1; // Il gioco è terminato
+    }
+
+    return 0; // Il gioco continua
+}
+
 /**
  * Pulisce le risorse associate a un client disconnesso in una partita.
  * Rimuove il client dall'epoll e dallo stato del gioco, e gestisce eventuali cleanup necessari.
@@ -613,11 +667,17 @@ void update_turn_order(GameState *game, int game_epoll_fd){
  * @param player_id ID del giocatore da rimuovere.
  */
 void cleanup_client_game(int epoll_fd, int client_fd, unsigned int player_id) {
+    LOG_DEBUG_TAG("Inizio pulizia per il giocatore %d.", player_id);
+
     // Rimuovi il client dall'epoll
     if(client_fd != -1) {
         epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
         close(client_fd);
     }
+
+    remove_user(player_id); // Rimuove l'utente dalla lista degli utenti
+    remove_player_from_game_state(current_game, player_id);
+    LOG_INFO_TAG("Utente %d disconnesso e rimosso", player_id);
 
     for(unsigned int i = 0; i < current_game->player_turn_order_count; i++) {
         if(current_game->player_turn_order[i] == (int)player_id) {
@@ -626,25 +686,28 @@ void cleanup_client_game(int epoll_fd, int client_fd, unsigned int player_id) {
             break;
         }
     }
-    remove_user(player_id); // Rimuove l'utente dalla lista degli utenti
-    LOG_INFO_TAG("Utente %d disconnesso e rimosso", player_id);
 
-    remove_player_from_game_state(current_game, player_id);
-
-    if(current_game->players_count == 0) {
-        // Se non ci sono più giocatori, distruggi lo stato del gioco
-        LOG_INFO_TAG("Non ci sono più giocatori nella partita, procedo a eliminarla");
-        remove_game(current_game->game_id); // Rimuovi la partita dallo stato del server
-        LOG_INFO_TAG("Partita %d rimossa dallo stato del server", current_game->game_id);
-
-        free_game_state(current_game);
-        pthread_exit(NULL); // Termina il thread di gioco
+    // Se il gioco era in corso, la disconnessione di un giocatore potrebbe portare alla vittoria di un altro.
+    if (current_game_state_type == GAME_IN_PROGRESS) {
+        if (check_victory_conditions(epoll_fd)) {
+            LOG_INFO_TAG("La disconnessione del giocatore %d ha terminato la partita.", player_id);
+            return;
+        }
+    }
+    
+    // Se non ci sono più giocatori (sia in lobby che in gioco), la partita deve terminare.
+    if (current_game->players_count == 0) {
+        LOG_INFO_TAG("Tutti i giocatori si sono disconnessi. La partita %d sarà eliminata.", current_game->game_id);
+        remove_game(current_game->game_id);
+        current_game->game_id = -1;
+        game_is_running = 0;
+        return; // Non c'è nessuno da notificare.
     }
 
     Payload *payload = createEmptyPayload();
     addPayloadKeyValuePairInt(payload, "player_id", player_id);
     send_to_all_players(current_game, MSG_PLAYER_LEFT, payload, -1);
-    // TODO dovrei evitare di rimuovere il giocatore per permettere la riconnessione
+    // TODO potrei evitare di rimuovere il giocatore per permettere la riconnessione
 }
 
 

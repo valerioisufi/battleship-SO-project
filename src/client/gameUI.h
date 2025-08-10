@@ -46,6 +46,7 @@
 
 #define LOG_SIZE 20
 
+// ordine di aquisizione dei mutex: game_state_mutex -> screen.mutex -> game_log.mutex
 typedef struct {
     pthread_mutex_t mutex;
 

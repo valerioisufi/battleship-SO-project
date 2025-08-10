@@ -40,22 +40,25 @@ static void enable_raw_mode() {
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
 }
 
-void hide_cursor() {
+static void hide_cursor() {
     printf("\x1b[?25l");
     fflush(stdout);
 }
 
-void show_cursor() {
+static void show_cursor() {
     printf("\x1b[?25h");
     fflush(stdout);
 }
 
-void clear_screen() {
+static void clear_screen() {
     printf("\x1b[2J"); // Clear the screen
     printf("\x1b[H");  // Move cursor to home position
     fflush(stdout);
 }
 
+/**
+ * Aggiorna le dimensioni della finestra di gioco.
+ */
 static void update_window_size(GameScreen *screen) {
     pthread_mutex_lock(&screen->mutex);
 
@@ -90,14 +93,17 @@ static void restore_terminal() {
     fflush(stdout);
 }
 
+/**
+ * Inizializza l'interfaccia di gioco.
+ */
 void init_game_interface() {
     tcgetattr(STDIN_FILENO, &orig_termios); // Salva le impostazioni correnti
     atexit(restore_terminal); // Assicura che il terminale venga ripristinato all'uscita
 
     enter_alternate_screen();
-    enable_raw_mode(); // Attiva la modalità raw DOPO essere entrato nello schermo alternativo
+    enable_raw_mode();
     hide_cursor();
-    clear_screen(); // Pulisci lo schermo alternativo per iniziare
+    clear_screen();
 
     // Registra il gestore per SIGWINCH
     struct sigaction sa;
@@ -119,6 +125,13 @@ void init_game_interface() {
 }
 
 
+/**
+ * Pulisce un'area dello schermo.
+ * @param x La coordinata x dell'angolo superiore sinistro dell'area da pulire.
+ * @param y La coordinata y dell'angolo superiore sinistro dell'area da pulire.
+ * @param width La larghezza dell'area da pulire.
+ * @param height L'altezza dell'area da pulire.
+ */
 void clear_area(int x, int y, int width, int height) {
     for (int row = 0; row < height; row++) {
         printf(MOVE_CURSOR_FORMAT, y + row + 1, x + 1);
@@ -130,6 +143,13 @@ void clear_area(int x, int y, int width, int height) {
     fflush(stdout);
 }
 
+/**
+ * Disegna un riquadro sullo schermo.
+ * @param x La coordinata x dell'angolo superiore sinistro del riquadro.
+ * @param y La coordinata y dell'angolo superiore sinistro del riquadro.
+ * @param width La larghezza del riquadro.
+ * @param height L'altezza del riquadro.
+ */
 void draw_box(int x, int y, int width, int height) {
     // Disegna il bordo superiore
     printf(MOVE_CURSOR_FORMAT, y + 1, x + 1);
@@ -156,6 +176,13 @@ void draw_box(int x, int y, int width, int height) {
     fflush(stdout);
 }
 
+/**
+ * Disegna la griglia di gioco per un giocatore.
+ * @param player Il giocatore di cui disegnare la griglia.
+ * @param x La coordinata x dell'angolo superiore sinistro della griglia.
+ * @param y La coordinata y dell'angolo superiore sinistro della griglia.
+ * @param ship_placement Le informazioni sul posizionamento delle navi.
+ */
 void draw_board(PlayerState *player, int x, int y, ShipPlacement *ship_placement) {
     if (!player) {
         return;
@@ -220,6 +247,11 @@ void draw_board(PlayerState *player, int x, int y, ShipPlacement *ship_placement
     fflush(stdout);
 }
 
+/**
+ * Disegna la legenda della griglia di gioco.
+ * @param x La coordinata x dell'angolo superiore sinistro della legenda.
+ * @param y La coordinata y dell'angolo superiore sinistro della legenda.
+ */
 void draw_legend(int x, int y) {
     printf(MOVE_CURSOR_FORMAT, y + 1, x + 1);
     printf("Legenda: ");
@@ -230,6 +262,9 @@ void draw_legend(int x, int y) {
 
 }
 
+/**
+ * Inizializza il log di gioco.
+ */
 void init_game_log() {
     for (int i = 0; i < LOG_SIZE; i++) {
         screen.game_log.log[i] = NULL; // Inizializza ogni voce del log a NULL
@@ -238,7 +273,11 @@ void init_game_log() {
     pthread_mutex_init(&screen.game_log.mutex, NULL);
 }
 
-// da utilizzare con asprintf
+/**
+ * Registra un messaggio nel log di gioco.
+ * @param fmt Il formato del messaggio di log.
+ * @param ... I valori da inserire nel formato.
+ */
 void log_game_message(char *fmt, ...) {
     char *message;
     va_list args;
@@ -265,6 +304,9 @@ void log_game_message(char *fmt, ...) {
     pthread_mutex_unlock(&screen.mutex);
 }
 
+/**
+ * Stampa i log di gioco.
+ */
 void print_game_log() {
     // Esempio di come disegnare un titolo nel riquadro
     printf(MOVE_CURSOR_FORMAT, screen.game_log.y + 1, screen.game_log.x + 2);
@@ -290,8 +332,10 @@ void print_game_log() {
 
 ShipPlacement ship;
 
+/**
+ * Aggiorna la griglia di gioco.
+ */
 void refresh_board() {
-    // clear_area((screen.width - CONTENT_WIDTH) / 2 + 1, START_GRID_Y, CONTENT_WIDTH - 2, GRID_SIZE + 3);
     int left_padding = (screen.width - GRID_WIDTH) / 2;
     switch(screen.game_screen_state) {
         case GAME_SCREEN_STATE_PLACING_SHIPS:
@@ -309,7 +353,12 @@ void refresh_board() {
             if(game->player_turn_order_count > 1){
                 PlayerState *current_player = get_player_state(game, game->player_turn_order[screen.current_showed_player]);
                 draw_board(current_player, left_padding + GRID_WIDTH + GRID_PADDING, START_GRID_Y, NULL);
-                printf(MOVE_CURSOR_FORMAT SET_COLOR_TEXT_FORMAT HIGHLIGHT_FORMAT "%s" RESET_FORMAT " %s", START_GRID_Y + GRID_SIZE + 4, left_padding + GRID_WIDTH + GRID_PADDING + 4, COLOR_GREEN, current_player->user.username ? current_player->user.username : "Unknown Player", "(avversario)");
+                char *player_name = current_player->user.username ? current_player->user.username : "Unknown Player";
+                int player_name_len = strlen(player_name);
+                printf(MOVE_CURSOR_FORMAT SET_COLOR_TEXT_FORMAT HIGHLIGHT_FORMAT "%s" RESET_FORMAT " (%d/%d)", START_GRID_Y + GRID_SIZE + 4, left_padding + GRID_WIDTH + GRID_PADDING + 4, COLOR_GREEN, player_name, screen.current_showed_player + 1, game->player_turn_order_count);
+                for(int i = 0; i < 20 - player_name_len; i++) {
+                    printf(" ");
+                }
 
                 if(screen.cursor.show) {
                     printf(MOVE_CURSOR_FORMAT SET_COLOR_TEXT_FORMAT HIGHLIGHT_FORMAT " " RESET_FORMAT, screen.cursor.y + START_GRID_Y + 3, left_padding + GRID_WIDTH + GRID_PADDING + screen.cursor.x * 2 + 6, COLOR_RED);
@@ -329,7 +378,11 @@ void refresh_board() {
     
 }
 
+/**
+ * Aggiorna la schermata di gioco.
+ */
 void refresh_screen() {
+    pthread_mutex_lock(&game_state_mutex);
     pthread_mutex_lock(&screen.mutex);
 
     clear_screen();
@@ -344,17 +397,16 @@ void refresh_screen() {
     char *title = "  Battleship Game  ";
     printf(MOVE_CURSOR_FORMAT "%s", 1, (screen.width - (int)strlen(title)) / 2 + 1, title);
 
-    pthread_mutex_lock(&game_state_mutex);
     refresh_board();
-    pthread_mutex_unlock(&game_state_mutex);
-
+    
     draw_legend((screen.width - CONTENT_WIDTH) / 2 + 4, START_LEGEND_Y);
-
+    
     pthread_mutex_lock(&screen.game_log.mutex);
     print_game_log();
     pthread_mutex_unlock(&screen.game_log.mutex);
-
+    
     pthread_mutex_unlock(&screen.mutex);
+    pthread_mutex_unlock(&game_state_mutex);
 }
 
 EscapeSequence read_escape_sequence() {
@@ -393,10 +445,10 @@ void *game_ui_thread(void *arg) {
 
     sigset_t set;
     sigemptyset(&set);
-    sigaddset(&set, SIGWINCH); // Sblocca SIGWINCH in questo thread
-    sigaddset(&set, SIGINT); // Sblocca SIGINT in questo thread
-    sigaddset(&set, SIGTERM); // Sblocca SIGTERM in questo thread
-    pthread_sigmask(SIG_UNBLOCK, &set, NULL);
+    sigaddset(&set, SIGWINCH);
+    sigaddset(&set, SIGINT);
+    sigaddset(&set, SIGTERM);
+    pthread_sigmask(SIG_UNBLOCK, &set, NULL); // Sblocca i segnali in questo thread
 
     LOG_INFO_FILE(client_log_file, "Refresh interfaccia di gioco");
     refresh_screen();
@@ -406,7 +458,8 @@ void *game_ui_thread(void *arg) {
     pthread_mutex_unlock(&screen.mutex);
 
     int ship_placed = 0;
-    ship.dim = 5;
+    int current_ship_dim[] = {5, 4, 3, 3, 2};
+    ship.dim = current_ship_dim[ship_placed];
     ship.vertical = 1;
 
     while (1) {
@@ -418,6 +471,7 @@ void *game_ui_thread(void *arg) {
         char c = getchar();
 
         if (c == '\x1b'){
+            pthread_mutex_lock(&game_state_mutex);
             pthread_mutex_lock(&screen.mutex);
             switch (read_escape_sequence()) {
                 case ESCAPE_UP:
@@ -441,22 +495,21 @@ void *game_ui_thread(void *arg) {
                 }
             ship.x = screen.cursor.x;
             ship.y = screen.cursor.y;
-            pthread_mutex_lock(&game_state_mutex);
             refresh_board();
-            pthread_mutex_unlock(&game_state_mutex);
             pthread_mutex_unlock(&screen.mutex);
+            pthread_mutex_unlock(&game_state_mutex);
         } else {
             switch (c) {
                 case 'R':
                 case 'r':
+                    pthread_mutex_lock(&game_state_mutex);
                     pthread_mutex_lock(&screen.mutex);
                     if (screen.game_screen_state == GAME_SCREEN_STATE_PLACING_SHIPS) {
                         ship.vertical = !ship.vertical; // Ruota la nave
                     }
-                    pthread_mutex_lock(&game_state_mutex);
                     refresh_board();
-                    pthread_mutex_unlock(&game_state_mutex);
                     pthread_mutex_unlock(&screen.mutex);
+                    pthread_mutex_unlock(&game_state_mutex);
                     break;
                 case '\n':
                     pthread_mutex_lock(&screen.mutex);
@@ -469,6 +522,7 @@ void *game_ui_thread(void *arg) {
                             placed_ok = 1;
                         }
                         pthread_mutex_unlock(&game_state_mutex);
+
                         if (placed_ok) {
                             if (ship_placed >= NUM_SHIPS) {
                                 // screen.game_screen_state = GAME_SCREEN_STATE_PLAYING;
@@ -477,47 +531,43 @@ void *game_ui_thread(void *arg) {
                                 screen.cursor.show = 0; // Nascondi il cursore
                                 pthread_mutex_unlock(&screen.mutex);
 
-                                log_game_message("Tutte le navi sono state piazzate. In attesa dell'inizio del gioco!");
+                                if (is_owner) {
+                                    log_game_message("Flotta schierata! Premi 'S' per iniziare la partita.");
+                                } else {
+                                    log_game_message("Flotta schierata! Attendi che il proprietario avvii la partita.");
+                                }
+
                                 GameUISignal sig;
                                 memset(&sig, 0, sizeof(sig));
                                 sig.type = GAME_UI_SIGNAL_FLEET_DEPLOYED;
                                 sig.data = NULL;
                                 write(pipe_fd_write, &sig, sizeof(GameUISignal));
                             } else {
-                                if (ship_placed < NUM_SHIPS) {
-                                    // ship.dim = 5 - ship_placed; // Aggiorna la dimensione della nave per il prossimo piazzamento
-                                    if(ship_placed == 1) {
-                                        ship.dim = 4; // La seconda nave è di dimensione 4
-                                    } else if(ship_placed == 2) {
-                                        ship.dim = 3; // La terza nave è di dimensione 3
-                                    } else if(ship_placed == 3) {
-                                        ship.dim = 3; // La quarta nave è di dimensione 3
-                                    } else if(ship_placed == 4) {
-                                        ship.dim = 2; // L'ultima nave è di dimensione 2
-                                    }
-                                }
-                                log_game_message("Nave piazzata con successo. Piazza la prossima nave.");
+                                int old_dim = ship.dim;
+                                ship.dim = current_ship_dim[ship_placed]; // Aggiorna alla dimensione della nave successiva
+                                log_game_message("Nave da %d piazzata. Ora posiziona la nave da %d.", old_dim, ship.dim);
                             }
                         } else {
-                            log_game_message("Impossibile piazzare la nave. Prova un'altra posizione.");
+                            log_game_message(SET_COLOR_TEXT_FORMAT "Posizione non valida!" RESET_FORMAT " La nave si sovrappone o è fuori griglia.", COLOR_YELLOW);
                         }
                         
-                        pthread_mutex_lock(&screen.mutex);
                         pthread_mutex_lock(&game_state_mutex);
+                        pthread_mutex_lock(&screen.mutex);
                         refresh_board();
-                        pthread_mutex_unlock(&game_state_mutex);
                         pthread_mutex_unlock(&screen.mutex);
+                        pthread_mutex_unlock(&game_state_mutex);
                         
                         continue;
                     } else if( screen.game_screen_state == GAME_SCREEN_STATE_PLAYING) {
                         pthread_mutex_unlock(&screen.mutex);
-                        if(game->player_turn == local_player_turn_index) {
-                            pthread_mutex_lock(&game_state_mutex);
+
+                        pthread_mutex_lock(&game_state_mutex);
+                        pthread_mutex_lock(&screen.mutex);
+                        if(game->player_turn == local_player_turn_index && screen.cursor.show) {
                             int player_id = game->player_turn_order[screen.current_showed_player];
                             PlayerState *current_player = get_player_state(game, player_id);
-                            if(current_player->board.grid[screen.cursor.x][screen.cursor.y] == '.'){
-                                pthread_mutex_unlock(&game_state_mutex);
 
+                            if(current_player->board.grid[screen.cursor.x][screen.cursor.y] == '.'){
                                 AttackPosition *attack_position = malloc(sizeof(AttackPosition));
                                 attack_position->player_id = player_id;
                                 attack_position->x = screen.cursor.x;
@@ -529,17 +579,21 @@ void *game_ui_thread(void *arg) {
                                 sig.data = attack_position;
                                 write(pipe_fd_write, &sig, sizeof(GameUISignal));
 
-                                pthread_mutex_lock(&game_state_mutex);
-                                game->player_turn = -1; // Passa il turno
-                                pthread_mutex_unlock(&game_state_mutex);
+                                screen.cursor.show = 0; // Nascondi il cursore dopo l'attacco
+                                refresh_board();
                             } else {
-                                pthread_mutex_unlock(&game_state_mutex);
-                                log_game_message("Colpito una cella già attaccata. Scegli un'altra cella.");
+                                pthread_mutex_unlock(&screen.mutex);
+                                log_game_message(SET_COLOR_TEXT_FORMAT "Cella già colpita!" RESET_FORMAT " Scegli un'altra coordinata.", COLOR_YELLOW);
+                                pthread_mutex_lock(&screen.mutex);
                             }
                         }
+                        pthread_mutex_unlock(&screen.mutex);
+                        pthread_mutex_unlock(&game_state_mutex);
                     }
                     break;
                 case 'S':
+                case 's':
+                    pthread_mutex_lock(&screen.mutex);
                     if(is_owner && screen.game_screen_state == GAME_SCREEN_STATE_PLACING_SHIPS) {
                         GameUISignal sig;
                         memset(&sig, 0, sizeof(sig));
@@ -547,32 +601,33 @@ void *game_ui_thread(void *arg) {
                         sig.data = NULL;
                         write(pipe_fd_write, &sig, sizeof(GameUISignal));
                     }
+                    pthread_mutex_unlock(&screen.mutex);
                     break;
                 case 'Q':
                 case 'q':
+                    pthread_mutex_lock(&game_state_mutex);
                     pthread_mutex_lock(&screen.mutex);
                     if(screen.game_screen_state == GAME_SCREEN_STATE_PLAYING){
-                        pthread_mutex_lock(&game_state_mutex);
                         do{
                             screen.current_showed_player = (screen.current_showed_player + game->player_turn_order_count - 1) % game->player_turn_order_count;
                         } while(game->player_turn_order[screen.current_showed_player] == -1 || (int)screen.current_showed_player == local_player_turn_index);
                         refresh_board();
-                        pthread_mutex_unlock(&game_state_mutex);
                     }
                     pthread_mutex_unlock(&screen.mutex);
+                    pthread_mutex_unlock(&game_state_mutex);
                     break;
                 case 'E':
                 case 'e':
+                    pthread_mutex_lock(&game_state_mutex);
                     pthread_mutex_lock(&screen.mutex);
                     if(screen.game_screen_state == GAME_SCREEN_STATE_PLAYING){
-                        pthread_mutex_lock(&game_state_mutex);
                         do{
                             screen.current_showed_player = (screen.current_showed_player + 1) % game->player_turn_order_count;
                         } while(game->player_turn_order[screen.current_showed_player] == -1 || (int)screen.current_showed_player == local_player_turn_index);
                         refresh_board();
-                        pthread_mutex_unlock(&game_state_mutex);
                     }
                     pthread_mutex_unlock(&screen.mutex);
+                    pthread_mutex_unlock(&game_state_mutex);
                     break;
 
                 default:

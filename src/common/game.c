@@ -142,15 +142,24 @@ PlayerState *get_player_state(GameState *game, unsigned int player_id) {
     return NULL; // Giocatore non trovato
 }
 
+char *get_player_username(GameState *game, unsigned int player_id) {
+    PlayerState *player_state = get_player_state(game, player_id);
+    if (player_state != NULL && player_state->user.username != NULL) {
+        return player_state->user.username;
+    }
+    return "Sconosciuto"; // Nome utente sconosciuto se il giocatore non è trovato
+}
+
 void free_game_state(GameState *game) {
     if (game == NULL) return;
 
     for (unsigned int i = 0; i < game->players_count; i++) {
         free(game->players[i].user.username);
-        free(game->players[i].fleet); // Libera la flotta se allocata
+        free(game->players[i].fleet);
     }
-    free(game->players);
     free(game->game_name);
+    free(game->players);
+    free(game->player_turn_order);
     free(game);
 }
 
@@ -233,7 +242,6 @@ int place_ship(GameBoard *board, ShipPlacement *ship) {
     if (board == NULL || ship == NULL) {
         return -1;
     }
-    LOG_DEBUG("Placing ship at (%d, %d) with size %d, vertical: %d", ship->x, ship->y, ship->dim, ship->vertical);
     if (board->ships_left >= NUM_SHIPS) {
         return -1; // Non è possibile posizionare più navi
     }
@@ -251,8 +259,7 @@ int place_ship(GameBoard *board, ShipPlacement *ship) {
             board->grid[ship->x + i][ship->y] = 'A' + ship->dim - 1; // Posiziona la nave
         }
     }
-    LOG_DEBUG("Ship placed successfully at (%d, %d) with size %d, vertical: %d", ship->x, ship->y, ship->dim, ship->vertical);
-
+    
     board->ships_left++;
     return 0;
 }

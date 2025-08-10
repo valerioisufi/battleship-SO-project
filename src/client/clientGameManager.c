@@ -90,7 +90,7 @@ void handle_game_msg(int conn_s, unsigned int game_id, char *game_name) {
     }
     
     LOG_INFO_FILE(client_log_file, "Do il benvenuto al giocatore `%s` nella partita `%s` con ID %d", user->username, game_name, game_id);
-    log_game_message("Benvenuto nella partita `%s` con ID %d", game_name, game_id);
+    log_game_message(SET_COLOR_TEXT_FORMAT "Benvenuto nella partita `%s` con ID %d." RESET_FORMAT, COLOR_GREEN, game_name, game_id);
 
     LOG_DEBUG_FILE(client_log_file, "Attendo che il server mi invii le informazioni sulla partita");
     if(safeSendMsg(conn_s, MSG_READY_TO_PLAY, NULL)){
@@ -162,8 +162,6 @@ void handle_game_msg(int conn_s, unsigned int game_id, char *game_name) {
                     addPayloadKeyValuePairInt(attack_payload, "player_id", attack_position->player_id);
                     addPayloadKeyValuePairInt(attack_payload, "x", attack_position->x);
                     addPayloadKeyValuePairInt(attack_payload, "y", attack_position->y);
-
-                    log_game_message("Attacco in corso contro il giocatore %d alla posizione (%d, %d)", attack_position->player_id, attack_position->x, attack_position->y);
                     
                     free(attack_position);
 
@@ -188,8 +186,6 @@ void handle_game_msg(int conn_s, unsigned int game_id, char *game_name) {
                 LOG_ERROR_FILE(client_log_file, "Errore durante la ricezione del messaggio di gioco dal server");
                 break;
             }
-
-            LOG_DEBUG_FILE(client_log_file, "Ricevuto messaggio di gioco: %d", msg_type);
 
             switch (msg_type) {
                 case MSG_GAME_STATE_UPDATE: {
@@ -269,11 +265,9 @@ void on_game_state_update_msg(Payload *payload) {
                 continue;
             }
             pthread_mutex_lock(&game_state_mutex);
-            int game_id_local = game->game_id;
             add_player_to_game_state(game, player_id, username);
             pthread_mutex_unlock(&game_state_mutex);
-            log_game_message("Giocatore %d (`%s`) si è unito alla partita %d", player_id, username, game_id_local);
-
+            
             free(username);
         }
 
@@ -295,13 +289,11 @@ void on_player_joined_msg(Payload *payload){
     }
 
     pthread_mutex_lock(&game_state_mutex);
-    int game_id_local = game->game_id;
     add_player_to_game_state(game, player_id, username);
     pthread_mutex_unlock(&game_state_mutex);
-    log_game_message("Giocatore %d (`%s`) si è unito alla partita %d", player_id, username, game_id_local);
 
+    log_game_message(SET_COLOR_TEXT_FORMAT "Il giocatore `%s` si è unito alla partita." RESET_FORMAT, COLOR_GREEN, username);
     free(username);
-
 }
 
 void on_player_left_msg(Payload *payload) {
@@ -321,19 +313,10 @@ void on_player_left_msg(Payload *payload) {
         }
     }
 
-    PlayerState *player_state = get_player_state(game, player_id);
-    if (player_state == NULL) {
-        LOG_ERROR_FILE(client_log_file, "Stato del giocatore non trovato");
-        pthread_mutex_unlock(&game_state_mutex);
-        return;
-    }
-    int game_id_local = game->game_id;
-    char *username_local = player_state->user.username ? strdup(player_state->user.username) : NULL;
+    log_game_message(SET_COLOR_TEXT_FORMAT "Il giocatore `%s` ha lasciato la partita." RESET_FORMAT, COLOR_RED, get_player_username(game, player_id));
     remove_player_from_game_state(game, player_id);
-    pthread_mutex_unlock(&game_state_mutex);
-    log_game_message("Il giocatore %d (`%s`) ha lasciato la partita %d", player_id, username_local ? username_local : "Unknown", game_id_local);
-    free(username_local);
     
+    pthread_mutex_unlock(&game_state_mutex);
 }
 
 void on_game_started_msg(Payload *payload) {
@@ -365,23 +348,20 @@ void on_game_started_msg(Payload *payload) {
             local_player_turn_index = i;
         }
     }
-
-    char *game_name_local = game->game_name ? strdup(game->game_name) : NULL;
-    int game_id_local = game->game_id;
     pthread_mutex_unlock(&game_state_mutex);
-    log_game_message("La partita `%s` con ID %d è iniziata!", game_name_local ? game_name_local : "?", game_id_local);
-    free(game_name_local);
 
+    log_game_message(SET_COLOR_TEXT_FORMAT "La partita è iniziata! Che la battaglia abbia inizio!" RESET_FORMAT, COLOR_YELLOW);
+
+    pthread_mutex_lock(&game_state_mutex);
     pthread_mutex_lock(&screen.mutex);
     screen.game_screen_state = GAME_SCREEN_STATE_PLAYING;
     screen.current_showed_player = 0;
-    pthread_mutex_lock(&game_state_mutex);
     do{
         screen.current_showed_player = (screen.current_showed_player + 1) % game->player_turn_order_count;
     } while(game->player_turn_order[screen.current_showed_player] == -1 || (int)screen.current_showed_player == local_player_turn_index);
-    pthread_mutex_unlock(&game_state_mutex);
     screen.cursor.show = 1;
     pthread_mutex_unlock(&screen.mutex);
+    pthread_mutex_unlock(&game_state_mutex);
 
     refresh_screen();
 }
@@ -398,16 +378,25 @@ void on_turn_order_update_msg(Payload *payload){
     pthread_mutex_lock(&game_state_mutex);
     game->player_turn = player_turn;
     int current_player_id = game->player_turn_order[player_turn];
+
+    pthread_mutex_lock(&screen.mutex);
+    refresh_board();
+    pthread_mutex_unlock(&screen.mutex);
+
+    log_game_message(SET_COLOR_TEXT_FORMAT "È il turno di `%s`." RESET_FORMAT, COLOR_YELLOW, get_player_username(game, current_player_id));
     pthread_mutex_unlock(&game_state_mutex);
-    log_game_message("È il turno del giocatore %d", current_player_id);
 }
 
 void on_your_turn_msg(){
     LOG_DEBUG_FILE(client_log_file, "Ricevuto MSG_YOUR_TURN");
 
-    log_game_message("È il tuo turno di giocare! Effettua la tua mossa...");
+    log_game_message(SET_COLOR_TEXT_FORMAT "È il tuo turno!" RESET_FORMAT " Scegli le coordinate e fai fuoco.", COLOR_GREEN);
     pthread_mutex_lock(&game_state_mutex);
-    game->player_turn = local_player_turn_index; // Imposta il turno del giocatore corrente a local_player_turn_index
+    pthread_mutex_lock(&screen.mutex);
+    game->player_turn = local_player_turn_index;
+    screen.cursor.show = 1;
+    refresh_board();
+    pthread_mutex_unlock(&screen.mutex);
     pthread_mutex_unlock(&game_state_mutex);
 }
 
@@ -447,6 +436,7 @@ void on_attack_update_msg(Payload *payload) {
     } else if (strcmp(result, "sunk") == 0) {
         set_cell(attacked_board, x, y, 'X'); // Colpito
         attacked_board->ships_left--; // Decrementa le navi rimaste
+        log_game_message(SET_COLOR_TEXT_FORMAT "Nave affondata! Navi rimaste: %d" RESET_FORMAT, COLOR_RED, attacked_board->ships_left);
         if(attacked_board->ships_left == 0) {
             log_case = 4;
             for(unsigned int i = 0; i < game->player_turn_order_count; i++) {
@@ -460,24 +450,31 @@ void on_attack_update_msg(Payload *payload) {
     } else {
         LOG_ERROR_FILE(client_log_file, "Risultato dell'attacco non riconosciuto: %s", result);
     }
-    pthread_mutex_unlock(&game_state_mutex);
 
     pthread_mutex_lock(&screen.mutex);
-    pthread_mutex_lock(&game_state_mutex);
     refresh_board();
-    pthread_mutex_unlock(&game_state_mutex);
     pthread_mutex_unlock(&screen.mutex);
-
-    if (log_case == 1) {
-        log_game_message("Il giocatore %d ha colpito la posizione (%d, %d)", attacker_id, x, y);
-    } else if (log_case == 2) {
-        log_game_message("Il giocatore %d ha mancato la posizione (%d, %d)", attacker_id, x, y);
-    } else if (log_case == 3) {
-        log_game_message("Il giocatore %d ha affondato una nave alla posizione (%d, %d)", attacker_id, x, y);
-    } else if (log_case == 4) {
-        log_game_message("Il giocatore %d ha perso tutte le sue navi", attacked_id);
+    
+    
+    int is_my_attack = (attacker_id == (int)user->user_id);
+    char col = 'A' + x;
+    int row = y + 1;
+    
+    if (log_case == 1) { // Colpito
+        if(is_my_attack) log_game_message("Hai " SET_COLOR_TEXT_FORMAT "COLPITO" RESET_FORMAT " `%s` in %c%d!", COLOR_RED, get_player_username(game, attacked_id), col, row);
+        else log_game_message("`%s` ha " SET_COLOR_TEXT_FORMAT "COLPITO" RESET_FORMAT " `%s` in %c%d!", get_player_username(game, attacker_id), COLOR_RED, get_player_username(game, attacked_id), col, row);
+    } else if (log_case == 2) { // Mancato
+        if(is_my_attack) log_game_message("Hai " SET_COLOR_TEXT_FORMAT "MANCATO" RESET_FORMAT " il bersaglio in %c%d.", COLOR_YELLOW, col, row);
+        else log_game_message("`%s` ha " SET_COLOR_TEXT_FORMAT "MANCATO" RESET_FORMAT " il bersaglio in %c%d.", get_player_username(game, attacker_id), COLOR_YELLOW, col, row);
+    } else if (log_case == 3) { // Affondato
+        if(is_my_attack) log_game_message("Hai " SET_COLOR_TEXT_FORMAT "AFFONDATO" RESET_FORMAT " una nave di `%s`!", COLOR_MAGENTA, get_player_username(game, attacked_id));
+        else log_game_message("`%s` ha " SET_COLOR_TEXT_FORMAT "AFFONDATO" RESET_FORMAT " una nave di `%s`!", get_player_username(game, attacker_id), COLOR_MAGENTA, get_player_username(game, attacked_id));
+    } else if (log_case == 4) { // Eliminato
+        if(is_my_attack) log_game_message("Hai " SET_COLOR_TEXT_FORMAT "AFFONDATO" RESET_FORMAT " l'ultima nave di `%s`!", COLOR_MAGENTA, get_player_username(game, attacked_id));
+        log_game_message(SET_COLOR_TEXT_FORMAT "`%s` è stato eliminato dalla partita!" RESET_FORMAT, COLOR_RED, get_player_username(game, attacked_id));
     }
-
+    
+    pthread_mutex_unlock(&game_state_mutex);
     free(result);
 
 }
@@ -496,9 +493,11 @@ void on_game_finished_msg(Payload *payload) {
     pthread_mutex_unlock(&screen.mutex);
 
     if(winner_id == (int)user->user_id) {
-        log_game_message("La partita è finita! Hai vinto!");
+        log_game_message("La partita è finita! " SET_COLOR_TEXT_FORMAT "Hai vinto! Congratulazioni!" RESET_FORMAT, COLOR_CYAN);
     } else {
-        log_game_message("La partita è finita! Il vincitore è il giocatore %d", winner_id);
+        pthread_mutex_lock(&game_state_mutex);
+        log_game_message("La partita è finita! " SET_COLOR_TEXT_FORMAT "Il vincitore è `%s`." RESET_FORMAT, COLOR_CYAN, get_player_username(game, winner_id));
+        pthread_mutex_unlock(&game_state_mutex);
     }
 
     sleep(15);

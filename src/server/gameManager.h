@@ -37,6 +37,7 @@ void on_error_player_action_msg(int game_epoll_fd, int client_s, unsigned int pl
 
 void send_to_all_players(GameState *game, uint16_t msg_type, Payload *payload, int except_player_id);
 void update_turn_order(GameState *game, int game_epoll_fd);
+int check_victory_conditions();
 
 void set_epoll_timer(TimerInfo *timer_info, int duration);
 int get_epoll_timer(TimerInfo *timer_info);
