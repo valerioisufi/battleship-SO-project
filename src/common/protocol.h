@@ -37,11 +37,12 @@ typedef enum {
     MSG_GAME_STATE_UPDATE,          // Aggiornamento generale sullo stato della partita (giocatori, flotte, ecc.).
     MSG_PLAYER_JOINED,              // Notifica che un nuovo giocatore si è unito alla partita.
     MSG_PLAYER_LEFT,                // Notifica che un giocatore ha abbandonato la partita.
+    MSG_FLEET_SETUP_REMINDER,       // Promemoria per i giocatori che devono ancora piazzare le navi.
     MSG_GAME_STARTED,               // Notifica che la partita è iniziata.
-    // MSG_PLAYER_READY,               // Notifica che un giocatore è pronto a giocare.
     MSG_TURN_ORDER_UPDATE,          // Aggiornamento sull'ordine di turno dei giocatori.
     MSG_YOUR_TURN,                  // Notifica che è il turno del client di effettuare una mossa.
     MSG_ATTACK_UPDATE,              // Aggiornamento sul risultato di un attacco (colpito, mancato, affondato).
+    MSG_YOU_ARE_ELIMINATED,         // Notifica che il giocatore è stato eliminato.
     MSG_GAME_FINISHED,              // Notifica che la partita è finita.
 
     MSG_ERROR_START_GAME,           // Errore durante l'avvio della partita.

@@ -17,14 +17,6 @@ typedef struct {
 } GameBoard;
 
 typedef struct {
-    int dim5; // Numero di navi di dimensione 5
-    int dim4; // Numero di navi di dimensione 4
-    int dim3; // Numero di navi di dimensione 3
-    int dim2; // Numero di navi di dimensione 2
-    int dim1; // Numero di navi di dimensione 1
-} FleetRequirement;
-
-typedef struct {
     int x, y; // Coordinate della cella
     int dim; // Dimensione della nave
     int vertical; // 1 se la nave è verticale, 0 se orizzontale

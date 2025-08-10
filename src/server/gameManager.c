@@ -382,7 +382,16 @@ void on_start_game_msg(int game_epoll_fd, int client_s, unsigned int player_id){
         } else {
             LOG_WARNING_TAG("Non tutti i giocatori hanno piazzato le navi, il gioco non può iniziare");
             current_game_state_type = GAME_WAITING_FLEET_SETUP;
-            set_epoll_timer(&timer_info, 120); // Imposta il timer a 120 secondi per consentire a chi ancora non ha piazzato le navi di farlo
+            
+            for(unsigned int i = 0; i < current_game->players_count; i++) {
+                if(current_game->players[i].fleet == NULL){
+                    int conn_s = get_user_socket_fd(current_game->players[i].user.user_id);
+                    safeSendMsg(conn_s, MSG_FLEET_SETUP_REMINDER, NULL);
+                }
+            }
+
+            // Imposta il timer a 120 secondi per consentire a chi ancora non ha piazzato le navi di farlo
+            set_epoll_timer(&timer_info, 120);
         }
     } else {
         LOG_ERROR_TAG("Il giocatore %d ha tentato di avviare la partita, ma non ne è il proprietario", player_id);
@@ -404,70 +413,102 @@ void on_attack_msg(int game_epoll_fd, int client_s, unsigned int player_id, Payl
     if (current_game_state_type != GAME_IN_PROGRESS) {
         LOG_WARNING_TAG("Il giocatore %d ha tentato di attaccare, ma il gioco non è in corso", player_id);
         on_error_player_action_msg(game_epoll_fd, client_s, player_id);
-        return; // Continua ad accettare altri messaggi
+        return;
     }
 
-    if (current_game->player_turn_order[current_game->player_turn] == (int)player_id) {
-        int attacked_player_id, x, y;
-        if(getPayloadIntValue(payload, 0, "player_id", &attacked_player_id) || getPayloadIntValue(payload, 0, "x", &x) || getPayloadIntValue(payload, 0, "y", &y)) {
-            LOG_ERROR_TAG("Errore durante l'ottenimento delle coordinate dell'attacco dal payload");
-            on_malformed_game_msg(game_epoll_fd, client_s, player_id);
-            return; // Continua ad accettare altri messaggi
-        }
-
-        PlayerState *attacked_player = get_player_state(current_game, attacked_player_id);
-        if (attacked_player == NULL) {
-            LOG_ERROR_TAG("Il giocatore %d non esiste nella partita", attacked_player_id);
-            on_error_player_action_msg(game_epoll_fd, client_s, player_id);
-            return; // Continua ad accettare altri messaggi
-        }
-
-        int ret = attack(attacked_player, x, y);
-        if (ret < 0) {
-            LOG_ERROR_TAG("Errore durante l'attacco del giocatore %d alla posizione (%d, %d)", attacked_player_id, x, y);
-            on_error_player_action_msg(game_epoll_fd, client_s, player_id);
-            return; // Continua ad accettare altri messaggi
-        }
-
-        Payload *attack_payload = createEmptyPayload();
-        addPayloadKeyValuePairInt(attack_payload, "attacker_id", player_id);
-        addPayloadKeyValuePairInt(attack_payload, "attacked_id", attacked_player_id);
-        addPayloadKeyValuePairInt(attack_payload, "x", x);
-        addPayloadKeyValuePairInt(attack_payload, "y", y);
-        if(ret == 0) {
-            LOG_DEBUG_TAG("Il giocatore %d ha mancato l'attacco alla posizione %c%d - player %d", player_id, x + 'A', y + 1, attacked_player_id);
-            addPayloadKeyValuePair(attack_payload, "result", "miss");
-        } else if(ret == 1) {
-            LOG_DEBUG_TAG("Il giocatore %d ha colpito una nave alla posizione %c%d - player %d", player_id, x + 'A', y + 1, attacked_player_id);
-            addPayloadKeyValuePair(attack_payload, "result", "hit");
-        } else if(ret >= 2) {
-            LOG_DEBUG_TAG("Il giocatore %d ha affondato una nave alla posizione %c%d - player %d", player_id, x + 'A', y + 1, attacked_player_id);
-            addPayloadKeyValuePair(attack_payload, "result", "sunk");
-        }
-
-        send_to_all_players(current_game, MSG_ATTACK_UPDATE, attack_payload, -1);
-
-        if(ret == 3){
-            LOG_INFO_TAG("Tutte le navi del giocatore %d sono state affondate. Giocatore eliminato.", attacked_player_id);
-
-            for(unsigned int i = 0; i < current_game->player_turn_order_count; i++){
-                if(current_game->player_turn_order[i] == attacked_player_id) {
-                    current_game->player_turn_order[i] = -1; // Rimuove il giocatore attaccato dall'ordine dei turni
-                    break;
-                }
-
-            }
-
-            if (check_victory_conditions(game_epoll_fd)) return;
-        }
-
-        update_turn_order(current_game, game_epoll_fd);
-    } else {
+    if (current_game->player_turn_order[current_game->player_turn] != (int)player_id) {
         LOG_WARNING_TAG("Il giocatore %d ha provato a eseguire un'azione, ma non è il suo turno", player_id);
         if(safeSendMsg(client_s, MSG_ERROR_NOT_YOUR_TURN, NULL) < 0) {
             LOG_MSG_ERROR("Errore durante l'invio del messaggio di errore al giocatore %d", player_id);
             cleanup_client_game(game_epoll_fd, client_s, player_id);
         }
+        return;
+    }
+
+    int attacked_player_id, x, y;
+    if (getPayloadIntValue(payload, 0, "player_id", &attacked_player_id) || getPayloadIntValue(payload, 0, "x", &x) || getPayloadIntValue(payload, 0, "y", &y)) {
+        LOG_ERROR_TAG("Payload di attacco malformato dal giocatore %d", player_id);
+        on_malformed_game_msg(game_epoll_fd, client_s, player_id);
+        return;
+    }
+
+    // Prevenzione Auto-Attacco
+    if ((unsigned int)attacked_player_id == player_id) {
+        LOG_WARNING_TAG("Il giocatore %d ha tentato di attaccare se stesso.", player_id);
+        on_error_player_action_msg(game_epoll_fd, client_s, player_id);
+        return;
+    }
+
+    PlayerState *attacked_player = get_player_state(current_game, attacked_player_id);
+    if (attacked_player == NULL) {
+        LOG_ERROR_TAG("Il giocatore %d ha attaccato un giocatore inesistente (%d)", player_id, attacked_player_id);
+        on_error_player_action_msg(game_epoll_fd, client_s, player_id);
+        return;
+    }
+
+    int ret = attack(attacked_player, x, y);
+    if (ret == -2) { // Cella già colpita
+        LOG_WARNING_TAG("Il giocatore %d ha attaccato una cella già colpita.", player_id);
+        on_error_player_action_msg(game_epoll_fd, client_s, player_id);
+        return;
+    } else if (ret < 0) { // Altro errore
+        LOG_ERROR_TAG("Errore imprevisto durante l'attacco: ret = %d", ret);
+        on_error_player_action_msg(game_epoll_fd, client_s, player_id);
+        return;
+    }
+
+    // Logica "Colpito e Tira Ancora"
+    int advance_turn = (ret == 0); // Avanza il turno solo se il colpo è mancato (ret == 0)
+    const char *result_str = NULL;
+
+    // 3. Struttura Migliorata (switch)
+    switch (ret) {
+        case 0: result_str = "miss"; break;
+        case 1: result_str = "hit"; break;
+        case 2: result_str = "sunk"; break;
+        case 3: result_str = "eliminated"; break;
+    }
+    
+    Payload *attack_payload = createEmptyPayload();
+    addPayloadKeyValuePairInt(attack_payload, "attacker_id", player_id);
+    addPayloadKeyValuePairInt(attack_payload, "attacked_id", attacked_player_id);
+    addPayloadKeyValuePairInt(attack_payload, "x", x);
+    addPayloadKeyValuePairInt(attack_payload, "y", y);
+    addPayloadKeyValuePair(attack_payload, "result", result_str);
+
+    LOG_DEBUG_TAG("Attacco da %d a %d in (%d,%d), risultato: %s", player_id, attacked_player_id, x, y, result_str);
+
+    if (ret == 3) { // Se un giocatore è stato eliminato
+        LOG_INFO_TAG("Il giocatore %d è stato eliminato da %d", attacked_player_id, player_id);
+        
+        // Rimuovi il giocatore dal ciclo dei turni
+        for (unsigned int i = 0; i < current_game->player_turn_order_count; i++) {
+            if (current_game->player_turn_order[i] == attacked_player_id) {
+                current_game->player_turn_order[i] = -1;
+                break;
+            }
+        }
+        
+        // Notifica di Eliminazione
+        int eliminated_fd = get_user_socket_fd(attacked_player_id);
+        if (eliminated_fd != -1) {
+            safeSendMsg(eliminated_fd, MSG_YOU_ARE_ELIMINATED, NULL);
+        }
+    }
+
+    send_to_all_players(current_game, MSG_ATTACK_UPDATE, attack_payload, -1);
+    
+    if (check_victory_conditions()) {
+        return; // La partita è finita
+    }
+    
+    if (advance_turn) {
+        update_turn_order(current_game, game_epoll_fd);
+    } else {
+        // Se non avanza il turno, notifica di nuovo il giocatore corrente e resetta il timer
+        LOG_INFO_TAG("Il giocatore %d ha colpito e ottiene un altro turno.", player_id);
+        safeSendMsg(client_s, MSG_YOUR_TURN, NULL);
+        set_epoll_timer(&timer_info, 60); // Resetta il timer per il nuovo turno
     }
 }
 

@@ -200,6 +200,10 @@ void handle_game_msg(int conn_s, unsigned int game_id, char *game_name) {
                     on_player_left_msg(payload);
                     break;
                 }
+                case MSG_FLEET_SETUP_REMINDER: {
+                    on_fleet_setup_reminder_msg();
+                    break;
+                }
                 case MSG_GAME_STARTED: {
                     on_game_started_msg(payload);
                     break;
@@ -214,6 +218,10 @@ void handle_game_msg(int conn_s, unsigned int game_id, char *game_name) {
                 }
                 case MSG_ATTACK_UPDATE: {
                     on_attack_update_msg(payload);
+                    break;
+                }
+                case MSG_YOU_ARE_ELIMINATED: {
+                    on_you_are_eliminated_msg(payload);
                     break;
                 }
                 case MSG_GAME_FINISHED: {
@@ -319,6 +327,12 @@ void on_player_left_msg(Payload *payload) {
     pthread_mutex_unlock(&game_state_mutex);
 }
 
+void on_fleet_setup_reminder_msg(){
+    LOG_DEBUG_FILE(client_log_file, "Ricevuto MSG_FLEET_SETUP_REMINDER");
+    log_game_message(SET_COLOR_TEXT_FORMAT "Piazza le navi!" RESET_FORMAT " Hai 2 minuti." RESET_FORMAT, COLOR_YELLOW);
+    log_game_message("Usa le Frecce per muovere, R per ruotare e Invio per confermare.");
+}
+
 void on_game_started_msg(Payload *payload) {
     LOG_DEBUG_FILE(client_log_file, "Ricevuto MSG_GAME_STARTED");
 
@@ -359,7 +373,7 @@ void on_game_started_msg(Payload *payload) {
     do{
         screen.current_showed_player = (screen.current_showed_player + 1) % game->player_turn_order_count;
     } while(game->player_turn_order[screen.current_showed_player] == -1 || (int)screen.current_showed_player == local_player_turn_index);
-    screen.cursor.show = 1;
+    screen.cursor.show = 0;
     pthread_mutex_unlock(&screen.mutex);
     pthread_mutex_unlock(&game_state_mutex);
 
@@ -436,17 +450,17 @@ void on_attack_update_msg(Payload *payload) {
     } else if (strcmp(result, "sunk") == 0) {
         set_cell(attacked_board, x, y, 'X'); // Colpito
         attacked_board->ships_left--; // Decrementa le navi rimaste
-        log_game_message(SET_COLOR_TEXT_FORMAT "Nave affondata! Navi rimaste: %d" RESET_FORMAT, COLOR_RED, attacked_board->ships_left);
-        if(attacked_board->ships_left == 0) {
-            log_case = 4;
-            for(unsigned int i = 0; i < game->player_turn_order_count; i++) {
-                if(game->player_turn_order[i] == (int)attacked_id) {
-                    game->player_turn_order[i] = -1; // Rimuove il giocatore dall'ordine dei turni
-                    break;
-                }
+        log_case = 3;
+    } else if (strcmp(result, "eliminated") == 0) {
+        set_cell(attacked_board, x, y, 'X'); // Colpito
+        attacked_board->ships_left = 0; // Tutte le navi sono state affondate
+        log_case = 4;
+        for(unsigned int i = 0; i < game->player_turn_order_count; i++) {
+            if(game->player_turn_order[i] == (int)attacked_id) {
+                game->player_turn_order[i] = -1; // Rimuove il giocatore dall'ordine dei turni
+                break;
             }
         }
-        log_case = 3;
     } else {
         LOG_ERROR_FILE(client_log_file, "Risultato dell'attacco non riconosciuto: %s", result);
     }
@@ -457,26 +471,51 @@ void on_attack_update_msg(Payload *payload) {
     
     
     int is_my_attack = (attacker_id == (int)user->user_id);
+    int am_i_attacked = (attacked_id == (int)user->user_id);
     char col = 'A' + x;
     int row = y + 1;
     
     if (log_case == 1) { // Colpito
         if(is_my_attack) log_game_message("Hai " SET_COLOR_TEXT_FORMAT "COLPITO" RESET_FORMAT " `%s` in %c%d!", COLOR_RED, get_player_username(game, attacked_id), col, row);
+        else if(am_i_attacked) log_game_message("`%s` ti ha " SET_COLOR_TEXT_FORMAT "COLPITO" RESET_FORMAT " in %c%d!", get_player_username(game, attacker_id), COLOR_RED, col, row);
         else log_game_message("`%s` ha " SET_COLOR_TEXT_FORMAT "COLPITO" RESET_FORMAT " `%s` in %c%d!", get_player_username(game, attacker_id), COLOR_RED, get_player_username(game, attacked_id), col, row);
     } else if (log_case == 2) { // Mancato
         if(is_my_attack) log_game_message("Hai " SET_COLOR_TEXT_FORMAT "MANCATO" RESET_FORMAT " il bersaglio in %c%d.", COLOR_YELLOW, col, row);
+        else if(am_i_attacked) log_game_message("`%s` ti ha " SET_COLOR_TEXT_FORMAT "MANCATO" RESET_FORMAT " in %c%d!", get_player_username(game, attacker_id), COLOR_YELLOW, col, row);
         else log_game_message("`%s` ha " SET_COLOR_TEXT_FORMAT "MANCATO" RESET_FORMAT " il bersaglio in %c%d.", get_player_username(game, attacker_id), COLOR_YELLOW, col, row);
     } else if (log_case == 3) { // Affondato
         if(is_my_attack) log_game_message("Hai " SET_COLOR_TEXT_FORMAT "AFFONDATO" RESET_FORMAT " una nave di `%s`!", COLOR_MAGENTA, get_player_username(game, attacked_id));
+        else if(am_i_attacked) log_game_message("`%s` ha " SET_COLOR_TEXT_FORMAT "AFFONDATO" RESET_FORMAT " una tua nave!", get_player_username(game, attacker_id), COLOR_MAGENTA);
         else log_game_message("`%s` ha " SET_COLOR_TEXT_FORMAT "AFFONDATO" RESET_FORMAT " una nave di `%s`!", get_player_username(game, attacker_id), COLOR_MAGENTA, get_player_username(game, attacked_id));
     } else if (log_case == 4) { // Eliminato
-        if(is_my_attack) log_game_message("Hai " SET_COLOR_TEXT_FORMAT "AFFONDATO" RESET_FORMAT " l'ultima nave di `%s`!", COLOR_MAGENTA, get_player_username(game, attacked_id));
-        log_game_message(SET_COLOR_TEXT_FORMAT "`%s` è stato eliminato dalla partita!" RESET_FORMAT, COLOR_RED, get_player_username(game, attacked_id));
+        if(is_my_attack) {
+            log_game_message("Hai " SET_COLOR_TEXT_FORMAT "AFFONDATO" RESET_FORMAT " l'ultima nave di `%s`!", COLOR_MAGENTA, get_player_username(game, attacked_id));
+            log_game_message("`%s` è stato eliminato dalla partita!", get_player_username(game, attacked_id));
+        }
+        else if (am_i_attacked) {
+            log_game_message("`%s` ha " SET_COLOR_TEXT_FORMAT "AFFONDATO" RESET_FORMAT " la tua ultima nave!", get_player_username(game, attacker_id), COLOR_MAGENTA);
+            log_game_message("Sei stato eliminato dalla partita!", get_player_username(game, attacked_id));
+        }
+        else {
+            log_game_message("`%s` ha " SET_COLOR_TEXT_FORMAT "AFFONDATO" RESET_FORMAT " l'ultima nave di `%s`!", get_player_username(game, attacker_id), COLOR_MAGENTA, get_player_username(game, attacked_id));
+            log_game_message("`%s` è stato eliminato dalla partita!", get_player_username(game, attacked_id));
+        }
     }
     
     pthread_mutex_unlock(&game_state_mutex);
     free(result);
 
+}
+
+void on_you_are_eliminated_msg() {
+    LOG_DEBUG_FILE(client_log_file, "Ricevuto MSG_YOU_ARE_ELIMINATED");
+
+    pthread_mutex_lock(&screen.mutex);
+    screen.game_screen_state = GAME_SCREEN_STATE_ELIMINATED;
+    screen.cursor.show = 0; // Nascondi il cursore
+    pthread_mutex_unlock(&screen.mutex);
+
+    refresh_screen(); // Aggiorna la UI per mostrare la schermata di eliminazione
 }
 
 void on_game_finished_msg(Payload *payload) {
@@ -501,6 +540,8 @@ void on_game_finished_msg(Payload *payload) {
         log_game_message("La partita è finita! " SET_COLOR_TEXT_FORMAT "Il vincitore è `%s`." RESET_FORMAT, COLOR_CYAN, get_player_username(game, winner_id));
         pthread_mutex_unlock(&game_state_mutex);
     }
+
+    refresh_screen();
 
     sleep(15);
 
