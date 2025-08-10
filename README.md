@@ -44,7 +44,7 @@ La comunicazione tra client e server si basa su un protocollo custom TCP. I mess
 
 - **Header:** contiene il tipo di messaggio (`msgType`) e la dimensione del payload (`payloadSize`).
 - **Payload:** stringa formattata con coppie chiave-valore (es. `[key1:value1|key2:value2],[key3:value3]`), serializzata prima dell'invio e deserializzata alla ricezione. Questa struttura permette di inviare dati complessi in modo strutturato.
-- Le funzioni `safeSendMsg` e `safeRecvMsg` garantiscono l'invio/ricezione completa dei messaggi, gestendo la natura a flusso di TCP.
+- Le funzioni `safeSendMsg` e `safeRecvMsg` garantiscono l'invio/ricezione completa dei messaggi.
 
 ### Gestione Dati e Concorrenza
 
@@ -62,7 +62,7 @@ Aprire un terminale nella directory radice del progetto ed eseguire uno dei segu
 
 - **Per compilare sia client che server:**
 	```bash
-	make all
+	make
 	```
 - **Solo server:**
 	```bash
@@ -88,10 +88,7 @@ Per avviare il server, specificare la porta su cui ascoltare:
 ```bash
 ./bin/server -port <numero_porta>
 ```
-Esempio:
-```bash
-./bin/server -port 8888
-```
+Esempio: `./bin/server -port 8888`
 
 **Client**
 
@@ -100,9 +97,6 @@ Per avviare il client, specificare l'indirizzo IP (o hostname) del server e la p
 ```bash
 ./bin/client -address <indirizzo_server> -port <numero_porta>
 ```
-Esempio:
-```bash
-./bin/client -address localhost -port 8888
-```
+Esempio: `./bin/client -address localhost -port 8888`
 
 Una volta connesso, il client richiederà di inserire un nome utente e presenterà un menu per creare una nuova partita o unirsi a una esistente.
