@@ -7,7 +7,7 @@
 #include "game.h"
 #include "utils/debug.h"
 
-FleetRequirement fleet_requirement = {1,1,2,1,0}; // Requisiti di flotta per la partita
+const int SHIP_PLACEMENT_SEQUENCE[NUM_SHIPS] = {5, 4, 3, 3, 2}; // Requisiti di flotta per la partita
 
 /**
  * Crea e inizializza lo stato di una partita.
@@ -56,12 +56,12 @@ GameState *create_game_state(unsigned int game_id, const char *game_name) {
  */
 int add_player_to_game_state(GameState *game, int player_id, char *username) {
     if(game == NULL || game->players == NULL) {
-        fprintf(stderr, "add_player_to_game: game or players array is NULL\n");
+        LOG_ERROR("add_player_to_game: game or players array is NULL");
         return -1;
     }
 
     if(username == NULL) {
-        fprintf(stderr, "add_player_to_game: username is NULL\n");
+        LOG_ERROR("add_player_to_game: username is NULL");
         return -1;
     }
 
@@ -82,7 +82,7 @@ int add_player_to_game_state(GameState *game, int player_id, char *username) {
     game->players[game->players_count].user.user_id = player_id;
     game->players[game->players_count].user.username = strdup(username);
     if (!game->players[game->players_count].user.username) {
-        fprintf(stderr, "Errore durante l'allocazione della memoria per il nome utente.\n");
+        LOG_ERROR("Errore durante l'allocazione della memoria per il nome utente");
         return -1;
     }
     game->players[game->players_count].fleet = NULL;
@@ -102,7 +102,7 @@ int add_player_to_game_state(GameState *game, int player_id, char *username) {
 int remove_player_from_game_state(GameState *game, unsigned int player_id) {
     // TODO dovrei evitare di rimuovere il giocatore per permettere la riconnessione e per mantenere l'ordine di inserimento
     if(game == NULL || game->players == NULL) {
-        fprintf(stderr, "remove_player_from_game: game or players array is NULL\n");
+        LOG_ERROR("remove_player_from_game: game or players array is NULL");
         return -1;
     }
 
@@ -129,7 +129,7 @@ int remove_player_from_game_state(GameState *game, unsigned int player_id) {
  */
 PlayerState *get_player_state(GameState *game, unsigned int player_id) {
     if (game == NULL || game->players == NULL) {
-        fprintf(stderr, "get_player_state: game or players array is NULL\n");
+        LOG_ERROR("get_player_state: game or players array is NULL");
         return NULL;
     }
 
@@ -174,7 +174,7 @@ int init_board(GameBoard *board) {
     }
 
     memset(board->grid, '.', sizeof(board->grid)); // Inizializza la griglia a vuoto
-    board->ships_left = 0; // Imposta il numero di navi rimaste
+    board->ships_left = NUM_SHIPS; // Imposta il numero di navi rimaste
     return 0;
 }
 
@@ -242,9 +242,6 @@ int place_ship(GameBoard *board, ShipPlacement *ship) {
     if (board == NULL || ship == NULL) {
         return -1;
     }
-    if (board->ships_left >= NUM_SHIPS) {
-        return -1; // Non è possibile posizionare più navi
-    }
 
     if (can_place_ship(board, ship) != 0) {
         return -1; // Posizione non valida per piazzare la nave
@@ -260,7 +257,6 @@ int place_ship(GameBoard *board, ShipPlacement *ship) {
         }
     }
     
-    board->ships_left++;
     return 0;
 }
 

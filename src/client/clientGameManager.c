@@ -492,7 +492,9 @@ void on_game_finished_msg(Payload *payload) {
     screen.game_screen_state = GAME_SCREEN_STATE_FINISHED;
     pthread_mutex_unlock(&screen.mutex);
 
-    if(winner_id == (int)user->user_id) {
+    if(winner_id == -1) {
+        log_game_message("La partita è finita! " SET_COLOR_TEXT_FORMAT "Nessun vincitore, la partita è stata annullata." RESET_FORMAT, COLOR_CYAN);
+    } else if(winner_id == (int)user->user_id) {
         log_game_message("La partita è finita! " SET_COLOR_TEXT_FORMAT "Hai vinto! Congratulazioni!" RESET_FORMAT, COLOR_CYAN);
     } else {
         pthread_mutex_lock(&game_state_mutex);

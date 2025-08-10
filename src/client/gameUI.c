@@ -458,8 +458,7 @@ void *game_ui_thread(void *arg) {
     pthread_mutex_unlock(&screen.mutex);
 
     int ship_placed = 0;
-    int current_ship_dim[] = {5, 4, 3, 3, 2};
-    ship.dim = current_ship_dim[ship_placed];
+    ship.dim = SHIP_PLACEMENT_SEQUENCE[ship_placed];
     ship.vertical = 1;
 
     while (1) {
@@ -513,7 +512,7 @@ void *game_ui_thread(void *arg) {
                     break;
                 case '\n':
                     pthread_mutex_lock(&screen.mutex);
-                    if (screen.game_screen_state == GAME_SCREEN_STATE_PLACING_SHIPS) {
+                    if (screen.game_screen_state == GAME_SCREEN_STATE_PLACING_SHIPS && ship_placed < NUM_SHIPS) {
                         pthread_mutex_unlock(&screen.mutex);
                         int placed_ok = 0;
                         pthread_mutex_lock(&game_state_mutex);
@@ -544,7 +543,7 @@ void *game_ui_thread(void *arg) {
                                 write(pipe_fd_write, &sig, sizeof(GameUISignal));
                             } else {
                                 int old_dim = ship.dim;
-                                ship.dim = current_ship_dim[ship_placed]; // Aggiorna alla dimensione della nave successiva
+                                ship.dim = SHIP_PLACEMENT_SEQUENCE[ship_placed]; // Aggiorna alla dimensione della nave successiva
                                 log_game_message("Nave da %d piazzata. Ora posiziona la nave da %d.", old_dim, ship.dim);
                             }
                         } else {
@@ -589,6 +588,8 @@ void *game_ui_thread(void *arg) {
                         }
                         pthread_mutex_unlock(&screen.mutex);
                         pthread_mutex_unlock(&game_state_mutex);
+                    } else {
+                        pthread_mutex_unlock(&screen.mutex);
                     }
                     break;
                 case 'S':

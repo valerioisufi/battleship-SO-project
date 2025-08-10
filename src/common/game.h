@@ -2,7 +2,9 @@
 #define GAME_H
 
 #define GRID_SIZE 10
+
 #define NUM_SHIPS 5
+extern const int SHIP_PLACEMENT_SEQUENCE[NUM_SHIPS]; // Requisiti di flotta per la partita
 
 typedef struct {
     unsigned int user_id; // ID dell'utente
@@ -46,17 +48,16 @@ typedef struct {
 typedef struct {
     char *game_name; // Nome della partita (max 30 caratteri + terminatore), NULL se non impostato
     int game_id; // ID della partita
-
+    
     PlayerState *players; // Array di giocatori nella partita
     unsigned int players_count; // Numero attuale di giocatori nella partita
     unsigned int players_capacity; // Capacità attuale dell'array dei giocatori
-
+    
     int *player_turn_order; // Array di ID dei giocatori in ordine di turno, NULL se non impostato
     int player_turn; // Index del giocatore  in `player_turn_order` il cui turno è attivo
     unsigned int player_turn_order_count; // Numero di giocatori in `player_turn_order`
 } GameState;
 
-extern FleetRequirement fleet_requirement; // Requisiti di flotta per la partita
 
 GameState *create_game_state(unsigned int game_id, const char *game_name);
 int add_player_to_game_state(GameState *game, int player_id, char *username);

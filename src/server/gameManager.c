@@ -228,7 +228,7 @@ void on_ready_to_play_msg(int game_epoll_fd, int client_s, unsigned int player_i
 
     Payload *payload = createEmptyPayload();
     addPayloadKeyValuePairInt(payload, "player_id", player_id);
-    addPayloadKeyValuePair(payload, "username", current_game->players[player_id].user.username);
+    addPayloadKeyValuePair(payload, "username", get_player_username(current_game, player_id));
     send_to_all_players(current_game, MSG_PLAYER_JOINED, payload, player_id);
 }
 
@@ -290,7 +290,7 @@ void on_setup_fleet_msg(int game_epoll_fd, int client_s, unsigned int player_id,
         if(place_ship(&player_state->board, &player_state->fleet->ships[i])){
             LOG_ERROR_TAG("Errore durante il piazzamento della nave %d per il giocatore %d", i, player_id);
             is_fleet_valid = 0;
-            // break; // Esci dal ciclo se il piazzamento fallisce
+            break; // Se una nave è piazzata male, l'intera flotta non è valida
         }
     }
 
@@ -299,21 +299,25 @@ void on_setup_fleet_msg(int game_epoll_fd, int client_s, unsigned int player_id,
         is_fleet_valid = 0;
     }
 
-    int dim5 = 0, dim4 = 0, dim3 = 0, dim2 = 0;
-    for (int i = 0; i < NUM_SHIPS; i++) {
-        int dim = player_state->fleet->ships[i].dim;
-        if (dim == 5) dim5++;
-        else if (dim == 4) dim4++;
-        else if (dim == 3) dim3++;
-        else if (dim == 2) dim2++;
-    }
+    if (is_fleet_valid) {
+        int received_dims[NUM_SHIPS];
+        for (int i = 0; i < NUM_SHIPS; i++) {
+            received_dims[i] = player_state->fleet->ships[i].dim;
+        }
 
-    if (dim5 != fleet_requirement.dim5 || dim4 != fleet_requirement.dim4 || dim3 != fleet_requirement.dim3 || dim2 != fleet_requirement.dim2) {
-        LOG_WARNING_TAG("Il giocatore %d ha inviato una flotta con dimensioni non valide: 5=%d, 4=%d, 3=%d, 2=%d", 
-                        player_id, dim5, dim4, dim3, dim2);
-        is_fleet_valid = 0;
-    }
+        int required_counts[GRID_SIZE + 1] = {0};
+        int received_counts[GRID_SIZE + 1] = {0};
 
+        for (int i = 0; i < NUM_SHIPS; i++) {
+            required_counts[SHIP_PLACEMENT_SEQUENCE[i]]++;
+            received_counts[received_dims[i]]++;
+        }
+
+        if (memcmp(required_counts, received_counts, sizeof(required_counts)) != 0) {
+            LOG_WARNING_TAG("Il giocatore %d ha inviato una flotta con una composizione di navi non valida.", player_id);
+            is_fleet_valid = 0;
+        }
+    }
 
     if(is_fleet_valid){
         LOG_INFO_TAG("La flotta del giocatore %d è stata piazzata correttamente", player_id);
@@ -679,6 +683,21 @@ void cleanup_client_game(int epoll_fd, int client_fd, unsigned int player_id) {
     remove_player_from_game_state(current_game, player_id);
     LOG_INFO_TAG("Utente %d disconnesso e rimosso", player_id);
 
+    // Controlla se il proprietario ha abbandonato prima dell'inizio della partita
+    if ((int)player_id == get_game_owner_id(current_game->game_id) && current_game_state_type == GAME_WAITING_FOR_PLAYERS) {
+        LOG_INFO_TAG("Il proprietario (%d) ha abbandonato la lobby. La partita %s verrà terminata.", player_id, current_game->game_name);
+
+        // Notifica ai giocatori rimanenti che la partita è finita (annullata)
+        Payload *payload = createEmptyPayload();
+        addPayloadKeyValuePairInt(payload, "winner_id", -1); // -1 indica nessun vincitore/partita annullata
+        send_to_all_players(current_game, MSG_GAME_FINISHED, payload, -1);
+
+        // Termino il thread di gioco
+        game_is_running = 0;
+        return;
+    }
+
+    // Rimuovi il giocatore dall'ordine dei turni se la partita è iniziata
     for(unsigned int i = 0; i < current_game->player_turn_order_count; i++) {
         if(current_game->player_turn_order[i] == (int)player_id) {
             current_game->player_turn_order[i] = -1; // Rimuove il giocatore dall'ordine dei turni
