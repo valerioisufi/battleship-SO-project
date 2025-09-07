@@ -1,5 +1,6 @@
 
 # ⚓️ Battaglia Navale Multiutente
+![Screenshot](screenshot.png)
 
 ## Introduzione e Specifiche del Progetto
 
