@@ -7,9 +7,9 @@
  * Effettua il parsing degli argomenti della riga di comando.
  * Analizza i parametri passati a main e aggiorna l'array di struct ArgvPara.
  * 
- * Il chiamante imposta ArgvParam.paramName e ArgvParam.paramShortName; questi valori
- * sono poi utilizzati per individuare negli argomenti passati da riga di comando
- * sequenze del tipo "-paramName paramValue" oppure "-paramShortName paramValue"
+ * Il chiamante imposta ArgvParam.paramName; questo valore
+ * viene poi utilizzato per individuare negli argomenti passati da riga di comando
+ * sequenze del tipo "-paramName paramValue"
  * 
  * @param argc Numero di parametri passati da riga di comando.
  * @param argv Array di stringhe contenente gli argomenti.
@@ -85,7 +85,7 @@ void printUsage(char *fileName, ArgvParam *argvParams){
  * Crea una lista collegata di strutture ArgvParam a partire da
  * una stringa di nomi di parametri separati da virgola.
  * 
- * @param paramsName Stringa nel formato "RVparamName1,-VparamName2,R-NparamName3,..",
+ * @param paramsName Stringa nel formato "RVparamName1,-VparamName2,R-paramName3,..",
  *              R = param is required, V = a value for the param is required, - = nothing
  * @return Puntatore alla testa della lista ArgvParam (il primo elemento utile è head->next).
  */

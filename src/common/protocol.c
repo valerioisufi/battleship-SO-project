@@ -447,7 +447,6 @@ Payload *parsePayload(char *buffer) {
         return NULL;
     }
 
-    // strtok non gestisce bene i token vuoti, quindi usiamo un approccio manuale
     char *cursor = buf_copy;
     while (*cursor) {
         // Salta le virgole iniziali
@@ -611,7 +610,11 @@ void freePayload(Payload *payload) {
 
 /**
  * Invia un messaggio a un client in modo sicuro, gestendo errori e cleanup automatico.
- * Se l'invio fallisce,  libera le risorse.
+ * Se l'invio fallisce, libera le risorse.
+ * Non libera automaticamente la memoria allocata per il payload dopo l'invio.
+ * @param client_fd File descriptor.
+ * @param msg_type Tipo del messaggio da inviare.
+ * @param payload Puntatore al Payload da inviare.
  * @return 0 in caso di successo, -1 in caso di errore.
  */
 int safeSendMsgWithoutCleanup(int client_fd, uint16_t msg_type, Payload *payload) {
@@ -635,6 +638,14 @@ int safeSendMsgWithoutCleanup(int client_fd, uint16_t msg_type, Payload *payload
     return result;
 }
 
+/** Invia un messaggio a un client in modo sicuro, gestendo errori e cleanup automatico.
+ * Se l'invio fallisce, libera le risorse.
+ * Libera automaticamente la memoria allocata per il payload dopo l'invio.
+ * @param client_fd File descriptor.
+ * @param msg_type Tipo del messaggio da inviare.
+ * @param payload Puntatore al Payload da inviare.
+ * @return 0 in caso di successo, -1 in caso di errore.
+ */
 int safeSendMsg(int client_fd, uint16_t msg_type, Payload *payload) {
     int result = safeSendMsgWithoutCleanup(client_fd, msg_type, payload);
     freePayload(payload);
